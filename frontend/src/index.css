@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-teal: #06b6d4;
+  --color-brand-teal-light: #22d3ee;
+  --color-brand-teal-glow: rgba(6, 182, 212, 0.4);
+  
+  --color-brand-magenta: #ec4899;
+  --color-brand-magenta-light: #f472b6;
+  --color-brand-magenta-glow: rgba(236, 72, 153, 0.4);
+
+  --color-brand-purple: #8b5cf6;
+  --color-brand-purple-light: #a78bfa;
+  --color-brand-purple-glow: rgba(139, 92, 246, 0.4);
+
+  --animate-pulse-slow: pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-orb-slow: float-orb 20s ease-in-out infinite;
+
+  @keyframes float-orb {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    33% { transform: translate(30px, -50px) scale(1.1); }
+    66% { transform: translate(-20px, 20px) scale(0.9); }
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-[#090d16] text-zinc-100 antialiased selection:bg-brand-teal/30 selection:text-brand-teal-light overflow-x-hidden;
+    font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom scrollbar matching dark mode theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(9, 13, 22, 0.5);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Custom Glassmorphism styles */
+.glass-card {
+  background: rgba(10, 15, 30, 0.45);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 20px 50px 0 rgba(0, 0, 0, 0.5);
+}
+
+.glass-input {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-input:focus {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(6, 182, 212, 0.5);
+  box-shadow: 0 0 16px rgba(6, 182, 212, 0.25);
+  outline: none;
+}
+
+/* Chrome autofill styles override for dark mode */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f4f4f5 !important;
+  -webkit-box-shadow: 0 0 0px 1000px rgba(10, 15, 30, 0.9) inset !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Custom glow effects for focus states */
+.glow-teal:focus-within {
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.15);
+}
+
+.glow-magenta:focus-within {
+  box-shadow: 0 0 20px rgba(236, 72, 153, 0.15);
+}
+
+.glow-purple:focus-within {
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.15);
+}
