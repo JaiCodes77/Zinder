@@ -4,7 +4,8 @@ from fastapi import FastAPI, Depends, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import redis.asyncio as redis
-
+import httpx
+from fastapi import HTTPException
 from app.config import settings
 from app.dependencies.auth import validate_session
 
@@ -58,18 +59,30 @@ class UserLogin(BaseModel):
 @app.post("/api/v1/auth/register", status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserRegister) -> Dict[str, Any]:
     """
-    Public registration endpoint.
-    Receives user payload to create a new profile credentials node.
+    Asynchronous API Gateway endpoint that proxies the registration request
+    downstream to the dedicated Authentication/Profile microservice.
     """
-    # Placeholder for forwarding the payload to the Authentication/User microservice.
-    return {
-        "status": "success",
-        "message": "User registration request received successfully",
-        "data": {
-            "email": user_data.email,
-            "name": user_data.name
-        }
-    }
+async with httpx.AsyncClient() as client:
+        try: 
+            response = await client.post(
+                "http://profile-service.zinder.internal/api/v1/users",
+                json=user_data.model_dump(),  # Pydantic v2 method to serialize class to dict
+                timeout=5.0
+            ) 
+
+            if response.status_code != status.HTTP_201_CREATED:
+                raise HTTPException(
+                    status_code = response.status_code, 
+                    detail = response.json().get("detail", "Registration downstream error")
+                ) 
+    
+            return response.json()  
+
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Profile Service Unavailable: {exc}"
+            )
 
 @app.post("/api/v1/auth/login", status_code=status.HTTP_200_OK)
 async def login(credentials: UserLogin, response: Response) -> Dict[str, Any]:
