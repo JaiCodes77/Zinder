@@ -62,7 +62,7 @@ async def register(user_data: UserRegister) -> Dict[str, Any]:
     Asynchronous API Gateway endpoint that proxies the registration request
     downstream to the dedicated Authentication/Profile microservice.
     """
-async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as client:
         try: 
             response = await client.post(
                 "http://profile-service.zinder.internal/api/v1/users",
