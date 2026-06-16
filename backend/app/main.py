@@ -1,7 +1,7 @@
 import json
 import uuid
 from contextlib import asynccontextmanager
-from typing import Dict, Any
+from typing import Dict, Any, List
 from fastapi import FastAPI, Depends, Response, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -16,15 +16,25 @@ from app.dependencies.auth import validate_session, get_redis
 # ==========================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize in-memory session store
+    app.state.memory_sessions = {}
+    
     # Startup: Initialize the Redis connection pool
-    app.state.redis_pool = redis.ConnectionPool.from_url(
-        settings.REDIS_URL,
-        max_connections=50,  # Optimized pool size for microservices gateway
-        decode_responses=False
-    )
+    try:
+        app.state.redis_pool = redis.ConnectionPool.from_url(
+            settings.REDIS_URL,
+            max_connections=50,  # Optimized pool size for microservices gateway
+            decode_responses=False
+        )
+    except Exception:
+        app.state.redis_pool = None
     yield
     # Shutdown: Gracefully close the Redis connection pool
-    await app.state.redis_pool.disconnect()
+    if getattr(app.state, "redis_pool", None) is not None:
+        try:
+            await app.state.redis_pool.disconnect()
+        except Exception:
+            pass
 
 # Initialize FastAPI App with Lifespan
 app = FastAPI(
@@ -67,7 +77,7 @@ async def register(user_data: UserRegister) -> Dict[str, Any]:
     async with httpx.AsyncClient() as client:
         try: 
             response = await client.post(
-                "http://profile-service.zinder.internal/api/v1/users",
+                "http://localhost:8081/api/v1/users",
                 json=user_data.model_dump(),  # Pydantic v2 method to serialize class to dict
                 timeout=5.0
             ) 
@@ -90,13 +100,13 @@ async def register(user_data: UserRegister) -> Dict[str, Any]:
 async def login(
     credentials: UserLogin, 
     response: Response, 
-    redis_client: redis.Redis = Depends(get_redis)
+    redis_client: redis.Redis | None = Depends(get_redis)
 ) -> Dict[str, Any]:
     """
     Public login endpoint.
     1. Proxies credentials to the downstream Profile/Auth microservice for verification.
     2. Generates a secure session ID (UUID) if validation succeeds.
-    3. Caches the user session payload inside Redis for 24 hours.
+    3. Caches the user session payload inside Redis (or local memory fallback) for 24 hours.
     4. Attaches the session ID via a secure, HTTP-only cookie.
     """
     # 1. Open an asynchronous network client to proxy credentials downstream
@@ -104,7 +114,7 @@ async def login(
         try: 
             # Send verification POST request to the downstream User/Profile microservice
             auth_response = await client.post(
-                "http://profile-service.zinder.internal/api/v1/users/verify",
+                "http://localhost:8081/api/v1/users/verify",
                 json=credentials.model_dump(),
                 timeout=5.0
             ) 
@@ -126,29 +136,38 @@ async def login(
     # 2. Generate a secure, unique user session ID
     session_id = str(uuid.uuid4())
 
-    # 3. Create the session payload to cache in Redis
+    # 3. Create the session payload to cache
     session_payload = {
         "userId": user_data.get("id"),
         "email": user_data.get("email"),
         "role": user_data.get("role", "user")
     }
 
-    # 4. Write session payload to Redis cache with 24 hours (86400 seconds) expiration
-    try:
-        await redis_client.set(
-            name = f"session:{session_id}",
-            value=json.dumps(session_payload),
-            ex=86400
-        ) 
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Session database write failed: {exc}"
-        ) 
+    # 4. Write session payload to Redis cache (or local memory)
+    session_written = False
+    if redis_client is not None:
+        try:
+            await redis_client.set(
+                name = f"session:{session_id}",
+                value=json.dumps(session_payload),
+                ex=86400
+            ) 
+            session_written = True
+        except Exception:
+            pass
+
+    if not session_written:
+        # Save to memory fallback
+        memory_sessions = getattr(app.state, "memory_sessions", None)
+        if memory_sessions is not None:
+            memory_sessions[f"session:{session_id}"] = json.dumps(session_payload)
+        else:
+            from app.dependencies.auth import MEMORY_SESSIONS
+            MEMORY_SESSIONS[f"session:{session_id}"] = json.dumps(session_payload)
     
     # 5. Set HTTP-only Cookie containing the session ID in response headers
     response.set_cookie(
-        key="sessionID",
+        key="sessionId",
         value=session_id,
         httponly=True,  # Blocks cross-site scripting (XSS) access to cookie
         secure=False,   # Set to True in HTTPS production environments
@@ -165,7 +184,7 @@ async def login(
     }
     
 # Downstream matcher service browse URL configuration placeholder
-MATCHER_SERVICE_URL = "http://matcher-service.zinder.internal/api/v1/matcher/browse" 
+MATCHER_SERVICE_URL = "http://localhost:8082/api/v1/matcher/browse" 
 
 @app.get("/api/v1/matcher/browse", status_code=status.HTTP_200_OK)
 async def browse(session: Dict[str, Any] = Depends(validate_session)) -> Dict[str, Any]:
@@ -186,7 +205,7 @@ async def browse(session: Dict[str, Any] = Depends(validate_session)) -> Dict[st
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
-                "http://matcher-service.zinder.internal/api/v1/matcher/browse",
+                "http://localhost:8082/api/v1/matcher/browse",
                 params={"userId": user_id},  # Forward user identity for filtering swiped decks
                 timeout=5.0
             ) 
@@ -207,3 +226,87 @@ async def browse(session: Dict[str, Any] = Depends(validate_session)) -> Dict[st
                 status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail = f"Matcher Service Unavailable: {exc}"
             )   
+
+# ==========================================
+# PROJECTS & PROFILE ME ROUTING
+# ==========================================
+
+class ProjectCreate(BaseModel):
+    title: str = Field(..., min_length=3, description="Project title")
+    description: str = Field(..., min_length=10, description="Project description")
+    tech_stack: List[str] = Field(..., description="List of technologies used")
+
+@app.get("/api/v1/profiles/me", status_code=status.HTTP_200_OK)
+async def get_my_profile(session: Dict[str, Any] = Depends(validate_session)) -> Dict[str, Any]:
+    user_id = session.get("userId")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session payload is missing user identification credentials"
+        )
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                "http://localhost:8081/api/v1/profiles/me",
+                headers={"X-User-Id": str(user_id)},
+                timeout=5.0
+            )
+            if response.status_code != status.HTTP_200_OK:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=response.json().get("detail", "Profile service error")
+                )
+            return response.json()
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Profile Service Unavailable: {exc}"
+            )
+
+@app.get("/api/v1/projects", status_code=status.HTTP_200_OK)
+async def get_projects(session: Dict[str, Any] = Depends(validate_session)) -> Any:
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                "http://localhost:8081/api/v1/projects",
+                timeout=5.0
+            )
+            if response.status_code != status.HTTP_200_OK:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=response.json().get("detail", "Profile service error")
+                )
+            return response.json()
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Profile Service Unavailable: {exc}"
+            )
+
+@app.post("/api/v1/projects", status_code=status.HTTP_201_CREATED)
+async def create_project(project_data: ProjectCreate, session: Dict[str, Any] = Depends(validate_session)) -> Dict[str, Any]:
+    user_id = session.get("userId")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session payload is missing user identification credentials"
+        )
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                "http://localhost:8081/api/v1/projects",
+                json=project_data.model_dump(),
+                headers={"X-User-Id": str(user_id)},
+                timeout=5.0
+            )
+            if response.status_code != status.HTTP_201_CREATED:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=response.json().get("detail", "Profile service error")
+                )
+            return response.json()
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Profile Service Unavailable: {exc}"
+            )

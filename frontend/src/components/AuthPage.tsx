@@ -150,9 +150,38 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
     setIsLoading(true);
     setToastMessage(null);
 
-    // Simulate connection to Gateway Microservice
     try {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const url = isLogin 
+        ? 'http://localhost:8080/api/v1/auth/login' 
+        : 'http://localhost:8080/api/v1/auth/register';
+      
+      const body = isLogin 
+        ? { email, password } 
+        : { email, password, name };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        credentials: 'include', // Ensure credentials/cookies are stored and sent
+      });
+
+      if (!response.ok) {
+        let errorDetail = 'Authentication failed. Please try again.';
+        try {
+          const data = await response.json();
+          if (data && data.detail) {
+            errorDetail = data.detail;
+          } else if (data && data.message) {
+            errorDetail = data.message;
+          }
+        } catch (e) {
+          // ignore
+        }
+        throw new Error(errorDetail);
+      }
       
       if (isLogin) {
         setToastMessage({ 
@@ -175,8 +204,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
           setPasswordTouched(false);
         }, 2500);
       }
-    } catch (error) {
-      setToastMessage({ text: 'Authentication failed. Please try again.', type: 'error' });
+    } catch (error: any) {
+      setToastMessage({ text: error.message || 'Authentication failed. Please try again.', type: 'error' });
     } finally {
       setIsLoading(false);
     }
