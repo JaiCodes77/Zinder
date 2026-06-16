@@ -915,11 +915,13 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                     <div className="mt-2.5 grid grid-cols-2 gap-3 text-sm">
                       <div className="p-3 bg-zinc-950/40 rounded-xl border border-white/5">
                         <span className="text-[10px] text-zinc-500 block">Looking for</span>
-                        <span className="font-semibold text-white mt-0.5 block">{myProfile.profile.looking_for}</span>
+                        <span className="font-semibold text-white mt-0.5 block">{myProfile.looking_for || "Not specified"}</span>
                       </div>
                       <div className="p-3 bg-zinc-950/40 rounded-xl border border-white/5">
                         <span className="text-[10px] text-zinc-500 block">Radius limit</span>
-                        <span className="font-semibold text-white mt-0.5 block">{myProfile.profile.radius_limit} miles</span>
+                        <span className="font-semibold text-white mt-0.5 block">
+                          {myProfile.radius_limit !== null ? `${myProfile.radius_limit} miles` : "Not specified"}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -927,20 +929,26 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                   {/* Bio & Interests */}
                   <div>
                     <h3 className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">Bio</h3>
-                    <p className="mt-2 text-sm text-zinc-300 bg-zinc-950/20 p-3 rounded-xl border border-white/5">{myProfile.profile.bio}</p>
+                    <p className="mt-2 text-sm text-zinc-300 bg-zinc-950/20 p-3 rounded-xl border border-white/5">
+                      {myProfile.bio || "No bio added yet."}
+                    </p>
                   </div>
 
                   <div>
                     <h3 className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">Interests / Tech Stack</h3>
                     <div className="mt-2.5 flex flex-wrap gap-2">
-                      {myProfile.profile.interests.map((interest: string, idx: number) => (
-                        <span 
-                          key={idx}
-                          className="px-3 py-1 rounded-full text-[10px] font-semibold tracking-wider text-brand-teal uppercase bg-brand-teal/5 border border-brand-teal/10"
-                        >
-                          {interest}
-                        </span>
-                      ))}
+                      {myProfile.interests && myProfile.interests.length > 0 ? (
+                        myProfile.interests.map((interest: string, idx: number) => (
+                          <span 
+                            key={idx}
+                            className="px-3 py-1 rounded-full text-[10px] font-semibold tracking-wider text-brand-teal uppercase bg-brand-teal/5 border border-brand-teal/10"
+                          >
+                            {interest}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-zinc-500 italic">No interests added yet.</span>
+                      )}
                     </div>
                   </div>
 
