@@ -112,6 +112,25 @@ def run_tests():
         user_id_b = res.json()["user"]["id"]
         print("User ID B:", user_id_b)
 
+        # 4.5. Update Profile for User A
+        print("\n--- 4.5. Update Profile for User A ---")
+        res = client_a.post("/api/v1/profiles", json={
+            "age": 28,
+            "looking_for": "Backend Partner",
+            "radius_limit": 25,
+            "bio": "Extremely passionate about distributed systems and Redis.",
+            "interests": ["Python", "Redis", "FastAPI"]
+        })
+        print("Update Profile A status:", res.status_code)
+        assert res.status_code == 200
+        profile_data = res.json()
+        print("Updated Profile A:", profile_data)
+        assert profile_data["age"] == 28
+        assert profile_data["looking_for"] == "Backend Partner"
+        assert profile_data["radius_limit"] == 25
+        assert profile_data["bio"] == "Extremely passionate about distributed systems and Redis."
+        assert "Redis" in profile_data["interests"]
+
         # 5. Browse candidates for User A
         print("\n--- 5. Browse Candidates for User A ---")
         res = client_a.get("/api/v1/matcher/browse")

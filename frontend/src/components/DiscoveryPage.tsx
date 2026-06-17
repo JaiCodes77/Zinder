@@ -37,12 +37,16 @@ interface Profile {
 }
 
 interface Match {
-  id: number;
+  id: number | string;
   name: string;
   avatar: string;
   lastMessage: string;
   time: string;
   unread: boolean;
+  type?: 'match' | 'project';
+  projectTitle?: string;
+  projectDesc?: string;
+  projectTech?: string[];
 }
 
 const INITIAL_PROFILES: Profile[] = [
@@ -274,11 +278,43 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
   const [matchModalData, setMatchModalData] = useState<{ id: number; name: string; avatar: string } | null>(null);
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [chatInput, setChatInput] = useState('');
-  const [chatMessages, setChatMessages] = useState<Array<{ sender: 'me' | 'them'; text: string; time: string }>>([
-    { sender: 'them', text: 'Hey there! Saw you also like distributed systems.', time: '10:42 AM' },
-    { sender: 'me', text: 'Yes! Zinder is built entirely on microservices.', time: '10:43 AM' },
-    { sender: 'them', text: 'Hey! Are you using REST or gRPC? 🔌', time: '10:44 AM' }
-  ]);
+  
+  // Profile edit states
+  const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
+  const [editAge, setEditAge] = useState<number>(25);
+  const [editLookingFor, setEditLookingFor] = useState<string>('');
+  const [editRadiusLimit, setEditRadiusLimit] = useState<number>(10);
+  const [editBio, setEditBio] = useState<string>('');
+  const [editInterests, setEditInterests] = useState<string[]>([]);
+  const [editInterestsInput, setEditInterestsInput] = useState<string>('');
+  const [savingProfile, setSavingProfile] = useState<boolean>(false);
+
+  // Per-chat messaging states
+  const [chatHistory, setChatHistory] = useState<Record<string | number, Array<{ sender: 'me' | 'them'; text: string; time: string }>>>({});
+
+  const getInitialMessagesForMatch = (match: Match) => {
+    if (match.type === 'project') {
+      return [
+        {
+          sender: 'them' as const,
+          text: `[SYSTEM: PROJECT BRIEF]\nProject: ${match.projectTitle}\nStack: ${match.projectTech?.join(', ') || 'None'}\n\nDescription: ${match.projectDesc}`,
+          time: match.time
+        },
+        {
+          sender: 'them' as const,
+          text: `Hey! Thanks for clicking 'Help Out' on my request for "${match.projectTitle}". I'd love to discuss this more!`,
+          time: match.time
+        }
+      ];
+    }
+    return [
+      { sender: 'them' as const, text: 'Hey there! Saw you also like distributed systems.', time: '10:42 AM' },
+      { sender: 'me' as const, text: 'Yes! Zinder is built entirely on microservices.', time: '10:43 AM' },
+      { sender: 'them' as const, text: 'Hey! Are you using REST or gRPC? 🔌', time: '10:44 AM' }
+    ];
+  };
+
+  const currentMessages = selectedMatch ? (chatHistory[selectedMatch.id] || getInitialMessagesForMatch(selectedMatch)) : [];
 
   // Framer Motion values for drag gestures
   const dragX = useMotionValue(0);
@@ -403,22 +439,116 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
     }
   };
 
+  const startEditing = () => {
+    if (myProfile) {
+      setEditAge(myProfile.age || 25);
+      setEditLookingFor(myProfile.looking_for || '');
+      setEditRadiusLimit(myProfile.radius_limit || 10);
+      setEditBio(myProfile.bio || '');
+      setEditInterests(myProfile.interests || []);
+      setEditInterestsInput('');
+      setIsEditingProfile(true);
+    }
+  };
+
+  const handleAddInterest = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      const interest = editInterestsInput.trim().replace(/,/g, '');
+      if (interest && !editInterests.includes(interest)) {
+        setEditInterests([...editInterests, interest]);
+      }
+      setEditInterestsInput('');
+    }
+  };
+
+  const handleRemoveInterest = (interest: string) => {
+    setEditInterests(editInterests.filter(i => i !== interest));
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingProfile(true);
+    try {
+      const payload = {
+        age: editAge,
+        looking_for: editLookingFor,
+        radius_limit: editRadiusLimit,
+        bio: editBio,
+        interests: editInterests,
+        distance: myProfile?.distance || '3 miles away'
+      };
+      
+      const res = await fetch('http://localhost:8080/api/v1/profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include'
+      });
+      
+      if (res.ok) {
+        await fetchProfile();
+        setIsEditingProfile(false);
+      } else {
+        const errData = await res.json();
+        alert(errData.detail || "Failed to update profile.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Network error. Could not update profile.");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   const handleSendChatMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
+    if (!chatInput.trim() || !selectedMatch) return;
 
-    setChatMessages((prev) => [
-      ...prev,
-      { sender: 'me', text: chatInput, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
-    ]);
+    const newMsg = { sender: 'me' as const, text: chatInput, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+    
+    // Update local history
+    setChatHistory(prev => {
+      const matchId = selectedMatch.id;
+      const history = prev[matchId] || getInitialMessagesForMatch(selectedMatch);
+      return {
+        ...prev,
+        [matchId]: [...history, newMsg]
+      };
+    });
+    
     setChatInput('');
 
-    // Simulate reply after 1.5s
+    // Trigger simulated reply after 1.5s
     setTimeout(() => {
-      setChatMessages((prev) => [
-        ...prev,
-        { sender: 'them', text: 'Gateway ping successful. Reply buffered! 🤖', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
-      ]);
+      let replyText = 'Gateway ping successful. Reply buffered! 🤖';
+      if (selectedMatch.type === 'project') {
+        const titleLower = (selectedMatch.projectTitle || '').toLowerCase();
+        const techStr = (selectedMatch.projectTech || []).map(t => t.toLowerCase()).join(' ');
+        
+        if (titleLower.includes('websocket') || techStr.includes('websocket') || titleLower.includes('scale') || titleLower.includes('scaling')) {
+          replyText = `Thanks for reaching out! For scaling WebSockets, we were thinking of using a Redis Pub/Sub backplane. What do you think?`;
+        } else if (techStr.includes('react') || techStr.includes('next.js') || techStr.includes('tailwind')) {
+          replyText = `Hey! Thanks for offering help. I'm struggling with performance bottlenecks during state updates. Have you worked with concurrent rendering before?`;
+        } else if (techStr.includes('python') || techStr.includes('fastapi') || techStr.includes('sqlite') || techStr.includes('postgresql')) {
+          replyText = `Appreciate the interest! We are running into database connection limits under high load with Python/FastAPI. Any suggestions on tuning the pool?`;
+        } else {
+          replyText = `Thanks for helping out! What tech stack from ${selectedMatch.projectTech?.join(', ') || 'our stack'} do you have the most experience with?`;
+        }
+      }
+      
+      const replyMsg = { sender: 'them' as const, text: replyText, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+      setChatHistory(prev => {
+        const matchId = selectedMatch.id;
+        const history = prev[matchId] || getInitialMessagesForMatch(selectedMatch);
+        return {
+          ...prev,
+          [matchId]: [...history, replyMsg]
+        };
+      });
+      
+      // Update lastMessage on match list
+      setMatches(prevMatches => prevMatches.map(m => m.id === selectedMatch.id ? { ...m, lastMessage: replyText } : m));
     }, 1500);
   };
 
@@ -957,7 +1087,12 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                       
                       <div className="flex-1 overflow-hidden">
                         <div className="flex justify-between items-baseline">
-                          <span className="text-sm font-semibold text-white">{match.name}</span>
+                          <span className="text-sm font-semibold text-white flex items-center gap-1.5">
+                            {match.name}
+                            {match.type === 'project' && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-brand-teal/20 text-brand-teal font-bold tracking-wider uppercase">Project</span>
+                            )}
+                          </span>
                           <span className="text-[10px] text-zinc-500">{match.time}</span>
                         </div>
                         <p className={`text-xs truncate mt-1 ${match.unread ? 'text-brand-teal font-semibold' : 'text-zinc-400'}`}>
@@ -1008,21 +1143,51 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
 
                   {/* Chat Messages Log */}
                   <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                    {chatMessages.map((msg, idx) => (
-                      <div 
-                        key={idx}
-                        className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}
-                      >
-                        <div className={`max-w-[70%] p-4 rounded-2xl text-sm ${
-                          msg.sender === 'me'
-                            ? 'bg-gradient-to-tr from-brand-teal to-brand-purple text-white rounded-br-none shadow-md shadow-brand-teal/5'
-                            : 'bg-zinc-900/80 border border-white/5 text-zinc-200 rounded-bl-none'
-                        }`}>
-                          <p className="leading-relaxed">{msg.text}</p>
-                          <span className="text-[9px] text-zinc-400 block text-right mt-1.5 font-medium">{msg.time}</span>
+                    {currentMessages.map((msg, idx) => {
+                      const isSystemBrief = msg.text.startsWith('[SYSTEM: PROJECT BRIEF]');
+                      if (isSystemBrief) {
+                        const titleLine = msg.text.split('\n')[1] || '';
+                        const stackLine = msg.text.split('\n')[2] || '';
+                        const descLines = msg.text.split('\n').slice(4).join('\n') || '';
+                        
+                        return (
+                          <div key={idx} className="w-full flex justify-center my-4">
+                            <div className="w-full max-w-md bg-white/2 border border-white/5 rounded-2xl p-4 text-xs space-y-2.5">
+                              <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                                <span className="text-[10px] font-bold tracking-wider text-brand-teal uppercase flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-brand-teal animate-pulse" />
+                                  Project Help Brief
+                                </span>
+                                <span className="text-[9px] text-zinc-500">{msg.time}</span>
+                              </div>
+                              <div className="space-y-1">
+                                <h4 className="font-bold text-zinc-200">{titleLine.replace('Project: ', '')}</h4>
+                                <p className="text-[10px] text-zinc-400">{stackLine}</p>
+                              </div>
+                              <p className="text-zinc-400 leading-relaxed font-normal bg-zinc-950/30 p-2.5 rounded-lg border border-white/5 whitespace-pre-wrap">
+                                {descLines.replace('Description: ', '')}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      }
+                      
+                      return (
+                        <div 
+                          key={idx}
+                          className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}
+                        >
+                          <div className={`max-w-[70%] p-4 rounded-2xl text-sm ${
+                            msg.sender === 'me'
+                              ? 'bg-gradient-to-tr from-brand-teal to-brand-purple text-white rounded-br-none shadow-md shadow-brand-teal/5'
+                              : 'bg-zinc-900/80 border border-white/5 text-zinc-200 rounded-bl-none'
+                          }`}>
+                            <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                            <span className="text-[9px] text-zinc-400 block text-right mt-1.5 font-medium">{msg.time}</span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   {/* Chat Input Area */}
@@ -1063,130 +1228,244 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
 
         {/* Profile Tab Screen */}
         {activeTab === 'profile' && (
-          <div className="flex-1 flex items-center justify-center p-6 md:p-12">
+          <div className="flex-1 flex items-center justify-center p-6 md:p-12 overflow-y-auto max-h-screen">
             {loadingProfile ? (
               <div className="flex flex-col items-center justify-center">
                 <Loader2 className="w-10 h-10 text-brand-teal animate-spin mb-4" />
                 <p className="text-sm text-zinc-400">Retrieving node profile details...</p>
               </div>
             ) : myProfile ? (
-              <div className="w-full max-w-lg glass-card rounded-3xl p-8 border border-white/5 shadow-2xl">
-                
-                {/* Profile Avatar Header */}
-                <div className="flex flex-col items-center border-b border-white/5 pb-8">
-                  <div className="relative group">
-                    <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-brand-teal via-brand-purple to-brand-magenta p-[3px] shadow-[0_0_30px_rgba(6,182,212,0.15)]">
-                      <div className="w-full h-full rounded-full bg-[#0a0f1e] overflow-hidden flex items-center justify-center font-bold text-3xl text-brand-teal">
-                        {getInitials(myProfile.user.name)}
+              isEditingProfile ? (
+                <form onSubmit={handleSaveProfile} className="w-full max-w-lg glass-card rounded-3xl p-8 border border-white/5 shadow-2xl space-y-6 my-auto">
+                  <div className="border-b border-white/5 pb-4">
+                    <h2 className="text-xl font-bold text-white tracking-tight">Edit Profile</h2>
+                    <p className="text-xs text-zinc-500 mt-1">Configure your discovery settings and developer bio</p>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    {/* Age and Radius limit */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="editAge" className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Age</label>
+                        <input
+                          id="editAge"
+                          type="number"
+                          min={18}
+                          max={120}
+                          value={editAge}
+                          onChange={(e) => setEditAge(parseInt(e.target.value) || 18)}
+                          className="w-full glass-input rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
+                          required
+                        />
+                      </div>
+                      
+                      <div>
+                        <label htmlFor="editRadiusLimit" className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Radius Limit (miles)</label>
+                        <input
+                          id="editRadiusLimit"
+                          type="number"
+                          min={0}
+                          value={editRadiusLimit}
+                          onChange={(e) => setEditRadiusLimit(parseInt(e.target.value) || 0)}
+                          className="w-full glass-input rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
+                          required
+                        />
                       </div>
                     </div>
-                    {/* Status beacon */}
-                    <span className="absolute bottom-1.5 right-1.5 w-4.5 h-4.5 rounded-full border-3 border-[#0a0f1e] bg-green-500" />
-                  </div>
 
-                  <h2 className="mt-4 text-xl font-bold text-white tracking-tight">{myProfile.user.name}</h2>
-                  <p className="text-xs text-zinc-500 mt-1 uppercase tracking-widest font-semibold">{myProfile.user.email}</p>
-                </div>
-
-                {/* Profile Specs */}
-                <div className="mt-8 space-y-6">
-                  <div>
-                    <h3 className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">Dating Preferences</h3>
-                    <div className="mt-2.5 grid grid-cols-2 gap-3 text-sm">
-                      <div className="p-3 bg-zinc-950/40 rounded-xl border border-white/5">
-                        <span className="text-[10px] text-zinc-500 block">Looking for</span>
-                        <span className="font-semibold text-white mt-0.5 block">{myProfile.looking_for || "Not specified"}</span>
-                      </div>
-                      <div className="p-3 bg-zinc-950/40 rounded-xl border border-white/5">
-                        <span className="text-[10px] text-zinc-500 block">Radius limit</span>
-                        <span className="font-semibold text-white mt-0.5 block">
-                          {myProfile.radius_limit !== null ? `${myProfile.radius_limit} miles` : "Not specified"}
-                        </span>
-                      </div>
+                    {/* Looking for */}
+                    <div>
+                      <label htmlFor="editLookingFor" className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Looking For</label>
+                      <input
+                        id="editLookingFor"
+                        type="text"
+                        placeholder="e.g. Backend Partner, Frontend Guru, Co-Founder"
+                        value={editLookingFor}
+                        onChange={(e) => setEditLookingFor(e.target.value)}
+                        className="w-full glass-input rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
+                      />
                     </div>
-                  </div>
 
-                  {/* Bio & Interests */}
-                  <div>
-                    <h3 className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">Bio</h3>
-                    <p className="mt-2 text-sm text-zinc-300 bg-zinc-950/20 p-3 rounded-xl border border-white/5">
-                      {myProfile.bio || "No bio added yet."}
-                    </p>
-                  </div>
+                    {/* Bio */}
+                    <div>
+                      <label htmlFor="editBio" className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Bio</label>
+                      <textarea
+                        id="editBio"
+                        rows={3}
+                        placeholder="Describe your project, stack, or developer philosophy..."
+                        value={editBio}
+                        onChange={(e) => setEditBio(e.target.value)}
+                        className="w-full glass-input rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none resize-none"
+                      />
+                    </div>
 
-                  <div>
-                    <h3 className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">Interests / Tech Stack</h3>
-                    <div className="mt-2.5 flex flex-wrap gap-2">
-                      {myProfile.interests && myProfile.interests.length > 0 ? (
-                        myProfile.interests.map((interest: string, idx: number) => (
-                          <span 
+                    {/* Interests / Tech Stack */}
+                    <div>
+                      <label htmlFor="editInterests" className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">Interests / Tech Stack</label>
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {editInterests.map((interest, idx) => (
+                          <span
                             key={idx}
-                            className="px-3 py-1 rounded-full text-[10px] font-semibold tracking-wider text-brand-teal uppercase bg-brand-teal/5 border border-brand-teal/10"
+                            className="px-2.5 py-1 rounded bg-brand-teal/10 border border-brand-teal/20 text-brand-teal text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5"
                           >
                             {interest}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveInterest(interest)}
+                              className="text-brand-teal hover:text-red-400 font-bold ml-1 focus:outline-none"
+                            >
+                              &times;
+                            </button>
                           </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-zinc-500 italic">No interests added yet.</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Connection Status Log */}
-                  <div>
-                    <h3 className="text-xs font-semibold text-zinc-400 tracking-wider uppercase mb-2">Microservices Nodes Connectivity</h3>
-                    <div className="space-y-2 text-xs">
-                      
-                      <div className="flex justify-between items-center p-3 rounded-xl bg-zinc-950/20 border border-white/5">
-                        <span className="text-zinc-400 font-medium">Matcher Service Node (v1.4)</span>
-                        <span className="text-green-400 font-bold flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-ping" />
-                          ONLINE
-                        </span>
+                        ))}
                       </div>
-
-                      <div className="flex justify-between items-center p-3 rounded-xl bg-zinc-950/20 border border-white/5">
-                        <span className="text-zinc-400 font-medium">Profile Service Node (v2.1)</span>
-                        <span className="text-green-400 font-bold flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-ping" />
-                          ONLINE
-                        </span>
-                      </div>
-
-                      <div className="flex justify-between items-center p-3 rounded-xl bg-zinc-950/20 border border-white/5">
-                        <span className="text-zinc-400 font-medium">Chat Messaging socket (TLS)</span>
-                        <span className="text-brand-teal font-bold flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-brand-teal animate-pulse" />
-                          LISTENING
-                        </span>
-                      </div>
-
+                      <input
+                        id="editInterests"
+                        type="text"
+                        placeholder="Type interest and press Enter or comma"
+                        value={editInterestsInput}
+                        onChange={(e) => setEditInterestsInput(e.target.value)}
+                        onKeyDown={handleAddInterest}
+                        className="w-full glass-input rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
+                      />
                     </div>
                   </div>
 
                   <div className="pt-4 flex gap-4">
                     <button
-                      type="button"
-                      onClick={() => {
-                        alert("Preferences saved. Gateway config updated.");
-                      }}
-                      className="flex-1 py-3 px-4 rounded-xl border border-white/10 hover:border-white/20 bg-zinc-950/40 hover:bg-zinc-900/60 text-sm font-semibold transition-all text-center cursor-pointer"
+                      type="submit"
+                      disabled={savingProfile}
+                      className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-brand-teal to-brand-purple text-sm font-semibold transition-all text-center text-white cursor-pointer disabled:opacity-50"
                     >
-                      Edit Profile
+                      {savingProfile ? 'Saving...' : 'Save Changes'}
                     </button>
 
                     <button
                       type="button"
-                      onClick={onLogout}
-                      className="flex-1 py-3 px-4 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-sm font-semibold transition-all text-center cursor-pointer"
+                      onClick={() => setIsEditingProfile(false)}
+                      className="flex-1 py-3 px-4 rounded-xl border border-white/10 hover:border-white/20 bg-zinc-950/40 hover:bg-zinc-900/60 text-sm font-semibold transition-all text-center cursor-pointer"
                     >
-                      Disconnect
+                      Cancel
                     </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="w-full max-w-lg glass-card rounded-3xl p-8 border border-white/5 shadow-2xl">
+                  
+                  {/* Profile Avatar Header */}
+                  <div className="flex flex-col items-center border-b border-white/5 pb-8">
+                    <div className="relative group">
+                      <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-brand-teal via-brand-purple to-brand-magenta p-[3px] shadow-[0_0_30px_rgba(6,182,212,0.15)]">
+                        <div className="w-full h-full rounded-full bg-[#0a0f1e] overflow-hidden flex items-center justify-center font-bold text-3xl text-brand-teal">
+                          {getInitials(myProfile.user.name)}
+                        </div>
+                      </div>
+                      {/* Status beacon */}
+                      <span className="absolute bottom-1.5 right-1.5 w-4.5 h-4.5 rounded-full border-3 border-[#0a0f1e] bg-green-500" />
+                    </div>
+
+                    <h2 className="mt-4 text-xl font-bold text-white tracking-tight">{myProfile.user.name}</h2>
+                    <p className="text-xs text-zinc-500 mt-1 uppercase tracking-widest font-semibold">{myProfile.user.email}</p>
+                  </div>
+
+                  {/* Profile Specs */}
+                  <div className="mt-8 space-y-6">
+                    <div>
+                      <h3 className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">Dating Preferences</h3>
+                      <div className="mt-2.5 grid grid-cols-2 gap-3 text-sm">
+                        <div className="p-3 bg-zinc-950/40 rounded-xl border border-white/5">
+                          <span className="text-[10px] text-zinc-500 block">Looking for</span>
+                          <span className="font-semibold text-white mt-0.5 block">{myProfile.looking_for || "Not specified"}</span>
+                        </div>
+                        <div className="p-3 bg-zinc-950/40 rounded-xl border border-white/5">
+                          <span className="text-[10px] text-zinc-500 block">Radius limit</span>
+                          <span className="font-semibold text-white mt-0.5 block">
+                            {myProfile.radius_limit !== null ? `${myProfile.radius_limit} miles` : "Not specified"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Bio & Interests */}
+                    <div>
+                      <h3 className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">Bio</h3>
+                      <p className="mt-2 text-sm text-zinc-300 bg-zinc-950/20 p-3 rounded-xl border border-white/5">
+                        {myProfile.bio || "No bio added yet."}
+                      </p>
+                    </div>
+
+                    <div>
+                      <h3 className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">Interests / Tech Stack</h3>
+                      <div className="mt-2.5 flex flex-wrap gap-2">
+                        {myProfile.interests && myProfile.interests.length > 0 ? (
+                          myProfile.interests.map((interest: string, idx: number) => (
+                            <span 
+                              key={idx}
+                              className="px-3 py-1 rounded-full text-[10px] font-semibold tracking-wider text-brand-teal uppercase bg-brand-teal/5 border border-brand-teal/10"
+                            >
+                              {interest}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-zinc-500 italic">No interests added yet.</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Connection Status Log */}
+                    <div>
+                      <h3 className="text-xs font-semibold text-zinc-400 tracking-wider uppercase mb-2">Microservices Nodes Connectivity</h3>
+                      <div className="space-y-2 text-xs">
+                        
+                        <div className="flex justify-between items-center p-3 rounded-xl bg-zinc-950/20 border border-white/5">
+                          <span className="text-zinc-400 font-medium">Matcher Service Node (v1.4)</span>
+                          <span className="text-green-400 font-bold flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-ping" />
+                            ONLINE
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between items-center p-3 rounded-xl bg-zinc-950/20 border border-white/5">
+                          <span className="text-zinc-400 font-medium">Profile Service Node (v2.1)</span>
+                          <span className="text-green-400 font-bold flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-ping" />
+                            ONLINE
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between items-center p-3 rounded-xl bg-zinc-950/20 border border-white/5">
+                          <span className="text-zinc-400 font-medium">Chat Messaging socket (TLS)</span>
+                          <span className="text-brand-teal font-bold flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-brand-teal animate-pulse" />
+                            LISTENING
+                          </span>
+                        </div>
+
+                      </div>
+                    </div>
+
+                    <div className="pt-4 flex gap-4">
+                      <button
+                        type="button"
+                        onClick={startEditing}
+                        className="flex-1 py-3 px-4 rounded-xl border border-white/10 hover:border-white/20 bg-zinc-950/40 hover:bg-zinc-900/60 text-sm font-semibold transition-all text-center cursor-pointer"
+                      >
+                        Edit Profile
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={onLogout}
+                        className="flex-1 py-3 px-4 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-sm font-semibold transition-all text-center cursor-pointer"
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+
                   </div>
 
                 </div>
-
-              </div>
+              )
             ) : (
               <div className="text-center w-full max-w-lg glass-card rounded-3xl p-8 border border-white/5">
                 <p className="text-red-400">Failed to load profile. Please verify Gateway connection.</p>
@@ -1393,7 +1672,28 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                       <button
                         type="button"
                         onClick={() => {
-                          alert(`Connection established with ${proj.user_name || 'Anonymous'}. Redirecting to secure chat channel...`);
+                          const projectHelpId = `project_help_${proj.id}`;
+                          const projectMatchItem: Match = {
+                            id: projectHelpId,
+                            name: proj.user_name || 'Anonymous',
+                            avatar: '/profile_3.png',
+                            lastMessage: `Help request: ${proj.title}`,
+                            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                            unread: true,
+                            type: 'project',
+                            projectTitle: proj.title,
+                            projectDesc: proj.description,
+                            projectTech: proj.tech_stack
+                          };
+                          
+                          setMatches(prev => {
+                            if (prev.some(m => m.id === projectHelpId)) {
+                              return prev;
+                            }
+                            return [projectMatchItem, ...prev];
+                          });
+                          
+                          setSelectedMatch(projectMatchItem);
                           setActiveTab('matches');
                         }}
                         className="px-4 py-2 rounded-xl border border-brand-teal/20 bg-brand-teal/5 text-[11px] font-bold text-brand-teal hover:bg-brand-teal hover:text-white transition-all shadow-[0_0_15px_rgba(6,182,212,0.05)] cursor-pointer"

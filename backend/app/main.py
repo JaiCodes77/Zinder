@@ -1,7 +1,7 @@
 import json
 import uuid
 from contextlib import asynccontextmanager
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, Depends, Response, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -63,6 +63,15 @@ class UserRegister(BaseModel):
 class UserLogin(BaseModel):
     email: str = Field(..., description="User email or username")
     password: str = Field(..., description="User password")
+
+class ProfileUpdate(BaseModel):
+    age: Optional[int] = Field(None, ge=18, le=120)
+    distance: Optional[str] = None
+    bio: Optional[str] = None
+    image: Optional[str] = None
+    interests: List[str] = Field(default_factory=list)
+    looking_for: Optional[str] = None
+    radius_limit: Optional[int] = Field(None, ge=0)
 
 # ==========================================
 # API ROUTE ENDPOINTS
@@ -315,6 +324,34 @@ async def get_my_profile(session: Dict[str, Any] = Depends(validate_session)) ->
         try:
             response = await client.get(
                 "http://localhost:8081/api/v1/profiles/me",
+                headers={"X-User-Id": str(user_id)},
+                timeout=5.0
+            )
+            if response.status_code != status.HTTP_200_OK:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=response.json().get("detail", "Profile service error")
+                )
+            return response.json()
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Profile Service Unavailable: {exc}"
+            )
+
+@app.post("/api/v1/profiles", status_code=status.HTTP_200_OK)
+async def update_profile(profile_data: ProfileUpdate, session: Dict[str, Any] = Depends(validate_session)) -> Dict[str, Any]:
+    user_id = session.get("userId")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session payload is missing user identification credentials"
+        )
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                "http://localhost:8081/api/v1/profiles",
+                json=profile_data.model_dump(),
                 headers={"X-User-Id": str(user_id)},
                 timeout=5.0
             )
