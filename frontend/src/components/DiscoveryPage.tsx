@@ -75,11 +75,6 @@ const INITIAL_PROFILES: Profile[] = [
   }
 ];
 
-const MOCK_MATCHES: Match[] = [
-  { id: 1, name: 'Sophia', avatar: '/profile_1.png', lastMessage: 'Hey! Are you using REST or gRPC? 🔌', time: '5m ago', unread: true },
-  { id: 3, name: 'Olivia', avatar: '/profile_3.png', lastMessage: 'That hiking trail was amazing!', time: '2h ago', unread: false }
-];
-
 interface DiscoveryPageProps {
   onLogout: () => void;
 }
@@ -147,6 +142,55 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
     }
   };
 
+  const fetchCandidates = async () => {
+    try {
+      setLoadingCandidates(true);
+      const res = await fetch('http://localhost:8080/api/v1/matcher/browse', {
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProfiles(data.map((p: any) => ({
+          id: p.user_id,
+          name: p.user?.name || 'Developer',
+          age: p.age || 25,
+          distance: p.distance || '1 mile away',
+          bio: p.bio || 'Backend developer who loves building high-performance systems.',
+          image: p.image || '/profile_3.png',
+          interests: p.interests || []
+        })));
+      }
+    } catch (err) {
+      console.error('Failed to fetch candidate profiles', err);
+    } finally {
+      setLoadingCandidates(false);
+    }
+  };
+
+  const fetchMatches = async () => {
+    try {
+      setLoadingMatches(true);
+      const res = await fetch('http://localhost:8080/api/v1/matcher/matches', {
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMatches(data.map((m: any) => ({
+          id: m.matched_user_id,
+          name: m.matched_user_name,
+          avatar: m.image || '/profile_3.png',
+          lastMessage: 'Mutual connection established! 💬',
+          time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          unread: false
+        })));
+      }
+    } catch (err) {
+      console.error('Failed to fetch matches', err);
+    } finally {
+      setLoadingMatches(false);
+    }
+  };
+
   // Tech stack interactive tag handlers
   const handleAddTech = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' || e.key === ',') {
@@ -202,22 +246,32 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
   // Fetch data on mount / tab change
   React.useEffect(() => {
     fetchProfile();
+    fetchCandidates();
+    fetchMatches();
   }, []);
 
   React.useEffect(() => {
     if (activeTab === 'projectHelp') {
       fetchProjects();
+    } else if (activeTab === 'discover') {
+      fetchCandidates();
+    } else if (activeTab === 'matches') {
+      fetchMatches();
     }
   }, [activeTab]);
 
   // Matcher Deck States
-  const [profiles, setProfiles] = useState<Profile[]>(INITIAL_PROFILES);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [history, setHistory] = useState<Profile[]>([]);
   const [likesCount, setLikesCount] = useState<number>(0);
   const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | 'up' | null>(null);
+  const [loadingCandidates, setLoadingCandidates] = useState<boolean>(true);
 
   // Chat / Messages States
-  const [matches, setMatches] = useState<Match[]>(MOCK_MATCHES);
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [loadingMatches, setLoadingMatches] = useState<boolean>(false);
+  const [showMatchModal, setShowMatchModal] = useState<boolean>(false);
+  const [matchModalData, setMatchModalData] = useState<{ id: number; name: string; avatar: string } | null>(null);
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState<Array<{ sender: 'me' | 'them'; text: string; time: string }>>([
@@ -241,69 +295,75 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
   // ==========================================
   // MICROSERVICE INTERACTION HOOKS (PLACEHOLDERS)
   // ==========================================
+  const postSwipe = async (targetUserId: number, action: 'LIKE' | 'PASS' | 'SUPERLIKE') => {
+    try {
+      const res = await fetch('http://localhost:8080/api/v1/matcher/swipe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          swiped_id: targetUserId,
+          action: action
+        }),
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.is_match) {
+          // Find target user details to show in match modal
+          const matchedProfile = profiles.find(p => p.id === targetUserId);
+          setMatchModalData({
+            id: targetUserId,
+            name: matchedProfile?.name || 'Developer',
+            avatar: matchedProfile?.image || '/profile_3.png'
+          });
+          setShowMatchModal(true);
+          fetchMatches(); // Reload matches list
+        }
+      }
+    } catch (err) {
+      console.error('Failed to post swipe', err);
+    }
+  };
+
+  const handleSendMessageFromModal = () => {
+    if (matchModalData) {
+      const targetUserId = matchModalData.id;
+      const existingMatch = matches.find(m => m.id === targetUserId);
+      const matchObj = existingMatch || {
+        id: targetUserId,
+        name: matchModalData.name,
+        avatar: matchModalData.avatar,
+        lastMessage: 'Mutual connection established! 💬',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        unread: false
+      };
+      if (!existingMatch) {
+        setMatches(prev => [matchObj, ...prev]);
+      }
+      setSelectedMatch(matchObj);
+      setActiveTab('matches');
+    }
+    setShowMatchModal(false);
+  };
+
   const handleLike = (userId: number) => {
-    /*
-      =======================================================
-      MICROSERVICES ARCHITECTURE INTEGRATION HOOK:
-      -------------------------------------------------------
-      ENDPOINT: POST gateway.zinder.internal/api/v1/matcher/like
-      BODY: { targetUserId: userId, action: 'LIKE' }
-      HEADERS: Authorization: Bearer <sessionToken>
-      
-      MICROSERVICE WORKFLOW:
-      1. Dispatches event to Kafka topic 'user-swipes'.
-      2. Matcher Service processes the event and checks Redis for a reciprocal LIKE.
-      3. If mutual, creates a match in DB, generates a Chat Room, and publishes 'match-found' event.
-      4. Push Notification Service triggers an alert on the socket gateway.
-      =======================================================
-    */
-    console.log(`[Microservice Dispatch] Action: LIKE, TargetUserId: ${userId}`);
-    
-    // UI update
+    postSwipe(userId, 'LIKE');
     setLikesCount((prev) => prev + 1);
     popCard('right');
   };
 
   const handlePass = (userId: number) => {
-    /*
-      =======================================================
-      MICROSERVICES ARCHITECTURE INTEGRATION HOOK:
-      -------------------------------------------------------
-      ENDPOINT: POST gateway.zinder.internal/api/v1/matcher/pass
-      BODY: { targetUserId: userId, action: 'PASS' }
-      HEADERS: Authorization: Bearer <sessionToken>
-      =======================================================
-    */
-    console.log(`[Microservice Dispatch] Action: PASS, TargetUserId: ${userId}`);
+    postSwipe(userId, 'PASS');
     popCard('left');
   };
 
   const handleSuperLike = (userId: number) => {
-    /*
-      =======================================================
-      MICROSERVICES ARCHITECTURE INTEGRATION HOOK:
-      -------------------------------------------------------
-      ENDPOINT: POST gateway.zinder.internal/api/v1/matcher/superlike
-      BODY: { targetUserId: userId, action: 'SUPERLIKE' }
-      HEADERS: Authorization: Bearer <sessionToken>
-      =======================================================
-    */
-    console.log(`[Microservice Dispatch] Action: SUPERLIKE, TargetUserId: ${userId}`);
+    postSwipe(userId, 'SUPERLIKE');
     popCard('up');
   };
 
   const handleRewind = () => {
-    /*
-      =======================================================
-      MICROSERVICES ARCHITECTURE INTEGRATION HOOK:
-      -------------------------------------------------------
-      ENDPOINT: POST gateway.zinder.internal/api/v1/matcher/rewind
-      HEADERS: Authorization: Bearer <sessionToken>
-      =======================================================
-    */
     if (history.length === 0) return;
-    console.log(`[Microservice Dispatch] Action: REWIND`);
-    
     const prevHistory = [...history];
     const lastSwiped = prevHistory.pop()!;
     setHistory(prevHistory);
@@ -574,7 +634,18 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
             {/* Profile Card Container (Relative viewport stack) */}
             <div className="relative w-full max-w-[380px] md:max-w-[420px] aspect-[3/4.5] flex items-center justify-center">
               <AnimatePresence>
-                {activeProfile ? (
+                {loadingCandidates ? (
+                  <motion.div
+                    key="loading-candidates"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="absolute inset-0 rounded-[28px] glass-card flex flex-col items-center justify-center p-8 text-center border border-white/5 z-10"
+                  >
+                    <Loader2 className="w-10.5 h-10.5 text-brand-teal animate-spin mb-4" />
+                    <p className="text-sm text-zinc-500 font-semibold tracking-wide">Querying live candidates...</p>
+                  </motion.div>
+                ) : activeProfile ? (
                   <motion.div
                     key={activeProfile.id}
                     drag="x"
@@ -746,6 +817,104 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
               
             </div>
 
+            {/* It's a Match! Success Overlay Modal */}
+            <AnimatePresence>
+              {showMatchModal && matchModalData && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#070b12]/90 backdrop-blur-xl"
+                >
+                  {/* Ambient Background Glows */}
+                  <div className="absolute top-1/2 left-1/3 -translate-y-1/2 w-64 h-64 rounded-full bg-brand-teal/20 blur-[100px] pointer-events-none" />
+                  <div className="absolute top-1/2 right-1/3 -translate-y-1/2 w-64 h-64 rounded-full bg-brand-magenta/20 blur-[100px] pointer-events-none" />
+
+                  <motion.div
+                    initial={{ scale: 0.9, y: 20 }}
+                    animate={{ scale: 1, y: 0 }}
+                    exit={{ scale: 0.9, y: 20 }}
+                    transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                    className="relative w-full max-w-md p-8 glass-card border border-white/10 rounded-[32px] text-center shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden"
+                  >
+                    {/* Top Sparkles */}
+                    <div className="flex justify-center mb-6">
+                      <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-brand-teal to-brand-magenta p-[2px] flex items-center justify-center animate-bounce">
+                        <Sparkles className="w-8 h-8 text-white" />
+                      </div>
+                    </div>
+
+                    {/* Title */}
+                    <h1 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-brand-teal via-white to-brand-magenta bg-clip-text text-transparent mb-2">
+                      It's a Match!
+                    </h1>
+                    <p className="text-zinc-400 text-sm max-w-xs mx-auto mb-8">
+                      You and <span className="text-white font-bold">{matchModalData.name}</span> have connected to build something great.
+                    </p>
+
+                    {/* Avatars Container */}
+                    <div className="flex items-center justify-center gap-8 mb-10 relative">
+                      {/* Current User Avatar */}
+                      <div className="relative">
+                        <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-brand-teal to-brand-purple p-[3px] shadow-[0_0_25px_rgba(6,182,212,0.3)]">
+                          <div className="w-full h-full rounded-full bg-[#0a0f1e] overflow-hidden flex items-center justify-center font-bold text-2xl text-brand-teal">
+                            {myProfile ? getInitials(myProfile.user.name) : 'ME'}
+                          </div>
+                        </div>
+                        <span className="absolute bottom-1 right-1 px-2 py-0.5 rounded-full bg-brand-teal text-[8px] font-bold text-white uppercase tracking-wider">
+                          You
+                        </span>
+                      </div>
+
+                      {/* Animated Glowing Heart Separator */}
+                      <motion.div 
+                        animate={{ scale: [1, 1.2, 1] }}
+                        transition={{ repeat: Infinity, duration: 1.5 }}
+                        className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-brand-magenta shadow-[0_0_20px_rgba(236,72,153,0.3)] z-10"
+                      >
+                        <Heart className="w-5 h-5 fill-current" />
+                      </motion.div>
+
+                      {/* Matched Candidate Avatar */}
+                      <div className="relative">
+                        <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-brand-purple to-brand-magenta p-[3px] shadow-[0_0_25px_rgba(236,72,153,0.3)]">
+                          <div className="w-full h-full rounded-full bg-[#0a0f1e] overflow-hidden">
+                            <img 
+                              src={matchModalData.avatar} 
+                              alt={matchModalData.name} 
+                              className="w-full h-full object-cover" 
+                            />
+                          </div>
+                        </div>
+                        <span className="absolute bottom-1 right-1 px-2 py-0.5 rounded-full bg-brand-magenta text-[8px] font-bold text-white uppercase tracking-wider">
+                          Match
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex flex-col gap-3">
+                      <button
+                        type="button"
+                        onClick={handleSendMessageFromModal}
+                        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-brand-teal to-brand-purple font-bold text-sm text-white shadow-lg shadow-brand-teal/20 hover:shadow-brand-teal/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                        <span>Send Message</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowMatchModal(false)}
+                        className="w-full py-3.5 rounded-xl border border-white/10 bg-white/5 font-semibold text-sm text-zinc-300 hover:text-white hover:bg-white/10 active:scale-[0.98] transition-all cursor-pointer"
+                      >
+                        Continue Swiping
+                      </button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
           </div>
         )}
 
@@ -761,40 +930,51 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                {matches.map((match) => (
-                  <button
-                    key={match.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedMatch(match);
-                      // Clear unread
-                      setMatches(matches.map(m => m.id === match.id ? { ...m, unread: false } : m));
-                    }}
-                    className={`w-full flex items-center gap-3.5 p-3.5 rounded-2xl transition-all border text-left ${
-                      selectedMatch?.id === match.id
-                        ? 'bg-white/5 border-white/10 shadow-lg'
-                        : 'bg-transparent border-transparent hover:bg-white/2 hover:border-white/5'
-                    }`}
-                  >
-                    <div className="w-11 h-11 rounded-full overflow-hidden border border-white/10 flex-shrink-0">
-                      <img src={match.avatar} alt={match.name} className="w-full h-full object-cover" />
-                    </div>
-                    
-                    <div className="flex-1 overflow-hidden">
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-sm font-semibold text-white">{match.name}</span>
-                        <span className="text-[10px] text-zinc-500">{match.time}</span>
+                {loadingMatches ? (
+                  <div className="w-full flex flex-col items-center justify-center py-10">
+                    <Loader2 className="w-6 h-6 text-brand-teal animate-spin mb-2" />
+                    <p className="text-[11px] text-zinc-500">Syncing matches...</p>
+                  </div>
+                ) : matches.length > 0 ? (
+                  matches.map((match) => (
+                    <button
+                      key={match.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedMatch(match);
+                        // Clear unread
+                        setMatches(matches.map(m => m.id === match.id ? { ...m, unread: false } : m));
+                      }}
+                      className={`w-full flex items-center gap-3.5 p-3.5 rounded-2xl transition-all border text-left ${
+                        selectedMatch?.id === match.id
+                          ? 'bg-white/5 border-white/10 shadow-lg'
+                          : 'bg-transparent border-transparent hover:bg-white/2 hover:border-white/5'
+                      }`}
+                    >
+                      <div className="w-11 h-11 rounded-full overflow-hidden border border-white/10 flex-shrink-0">
+                        <img src={match.avatar} alt={match.name} className="w-full h-full object-cover" />
                       </div>
-                      <p className={`text-xs truncate mt-1 ${match.unread ? 'text-brand-teal font-semibold' : 'text-zinc-400'}`}>
-                        {match.lastMessage}
-                      </p>
-                    </div>
+                      
+                      <div className="flex-1 overflow-hidden">
+                        <div className="flex justify-between items-baseline">
+                          <span className="text-sm font-semibold text-white">{match.name}</span>
+                          <span className="text-[10px] text-zinc-500">{match.time}</span>
+                        </div>
+                        <p className={`text-xs truncate mt-1 ${match.unread ? 'text-brand-teal font-semibold' : 'text-zinc-400'}`}>
+                          {match.lastMessage}
+                        </p>
+                      </div>
 
-                    {match.unread && (
-                      <span className="w-2.5 h-2.5 rounded-full bg-brand-teal flex-shrink-0" />
-                    )}
-                  </button>
-                ))}
+                      {match.unread && (
+                        <span className="w-2.5 h-2.5 rounded-full bg-brand-teal flex-shrink-0" />
+                      )}
+                    </button>
+                  ))
+                ) : (
+                  <div className="text-center py-10">
+                    <p className="text-sm text-zinc-500">No matches yet. Keep swiping!</p>
+                  </div>
+                )}
               </div>
             </div>
 

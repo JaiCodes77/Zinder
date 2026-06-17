@@ -17,18 +17,28 @@ async def get_redis(request: Request) -> AsyncGenerator[redis.Redis | None, None
         return
         
     client = redis.Redis(connection_pool=pool)
+    is_alive = False
     try:
         # Ping to verify active connection
         await client.ping()
-        yield client
+        is_alive = True
     except Exception:
-        # Fallback to local memory if connection is refused
-        yield None
-    finally:
+        pass
+
+    if is_alive:
+        try:
+            yield client
+        finally:
+            try:
+                await client.close()
+            except Exception:
+                pass
+    else:
         try:
             await client.close()
         except Exception:
             pass
+        yield None
 
 async def validate_session(
     request: Request,

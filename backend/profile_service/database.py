@@ -103,7 +103,7 @@ def init_db() -> None:
                     25,
                     "3 miles away",
                     "Frontend wizard looking for a backend buddy to build scaling systems.",
-                    "/profile_alice.png",
+                    "/profile_1.png",
                     json.dumps(["React", "CSS", "UI/UX", "Vite"]),
                     "Backend Partner",
                     10
@@ -140,7 +140,7 @@ def init_db() -> None:
                     30,
                     "5 miles away",
                     "Rustacean and systems engineer. I like building compilers and database engines.",
-                    "/profile_bob.png",
+                    "/profile_2.png",
                     json.dumps(["Rust", "Systems", "Compilers", "Databases"]),
                     "Frontend Developer",
                     15
@@ -314,3 +314,28 @@ def delete_project(project_id: int, user_id: int) -> bool:
         cursor.execute("DELETE FROM projects WHERE id = ? AND user_id = ?", (project_id, user_id))
         conn.commit()
         return cursor.rowcount > 0
+
+def get_all_profiles() -> List[Dict[str, Any]]:
+    """
+    Retrieves all profiles in the system, joining with user details.
+    """
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT u.id as user_id, u.email, u.name,
+                   p.age, p.distance, p.bio, p.image, p.interests, p.looking_for, p.radius_limit
+            FROM users u
+            LEFT JOIN profiles p ON u.id = p.user_id
+        """)
+        rows = cursor.fetchall()
+        
+    profiles = []
+    for row in rows:
+        profile = dict(row)
+        interests_str = profile.get("interests")
+        try:
+            profile["interests"] = json.loads(interests_str) if interests_str else []
+        except Exception:
+            profile["interests"] = []
+        profiles.append(profile)
+    return profiles

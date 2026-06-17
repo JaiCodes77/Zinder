@@ -183,15 +183,19 @@ async def login(
         }
     }
     
-# Downstream matcher service browse URL configuration placeholder
-MATCHER_SERVICE_URL = "http://localhost:8082/api/v1/matcher/browse" 
+# Downstream matcher service URL configuration
+MATCHER_SERVICE_URL = "http://localhost:8082" 
+
+class SwipeRequest(BaseModel):
+    swiped_id: int = Field(..., description="The ID of the user being swiped on")
+    action: str = Field(..., description="Swipe action: 'LIKE', 'PASS', 'SUPERLIKE'")
 
 @app.get("/api/v1/matcher/browse", status_code=status.HTTP_200_OK)
-async def browse(session: Dict[str, Any] = Depends(validate_session)) -> Dict[str, Any]:
+async def browse(session: Dict[str, Any] = Depends(validate_session)) -> Any:
     """
     Protected browsing route.
-    1. Validates the request sessionId cookie against Redis (via validate_session).
-    2. Proxies the request to the Matcher Microservice, passing the authenticated userId.
+    1. Validates the request sessionId cookie against Redis/Memory (via validate_session).
+    2. Proxies the request to the Matcher Microservice, passing the authenticated userId in X-User-Id header.
     """
     # 1. Retrieve the userId from the validated session
     user_id = session.get("userId")
@@ -205,8 +209,8 @@ async def browse(session: Dict[str, Any] = Depends(validate_session)) -> Dict[st
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
-                "http://localhost:8082/api/v1/matcher/browse",
-                params={"userId": user_id},  # Forward user identity for filtering swiped decks
+                f"{MATCHER_SERVICE_URL}/api/v1/matcher/browse",
+                headers={"X-User-Id": str(user_id)},
                 timeout=5.0
             ) 
 
@@ -226,6 +230,69 @@ async def browse(session: Dict[str, Any] = Depends(validate_session)) -> Dict[st
                 status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail = f"Matcher Service Unavailable: {exc}"
             )   
+
+@app.post("/api/v1/matcher/swipe", status_code=status.HTTP_200_OK)
+async def swipe(swipe_data: SwipeRequest, session: Dict[str, Any] = Depends(validate_session)) -> Dict[str, Any]:
+    """
+    Protected swipe route.
+    Proxies swipe action downstream to Matcher Service.
+    """
+    user_id = session.get("userId")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session payload is missing user identification credentials"
+        )
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{MATCHER_SERVICE_URL}/api/v1/matcher/swipe",
+                json=swipe_data.model_dump(),
+                headers={"X-User-Id": str(user_id)},
+                timeout=5.0
+            )
+            if response.status_code != status.HTTP_200_OK:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=response.json().get("detail", "Matcher service error")
+                )
+            return response.json()
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Matcher Service Unavailable: {exc}"
+            )
+
+@app.get("/api/v1/matcher/matches", status_code=status.HTTP_200_OK)
+async def get_matches(session: Dict[str, Any] = Depends(validate_session)) -> Any:
+    """
+    Protected matches retrieval route.
+    Proxies matches request downstream to Matcher Service.
+    """
+    user_id = session.get("userId")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session payload is missing user identification credentials"
+        )
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                f"{MATCHER_SERVICE_URL}/api/v1/matcher/matches",
+                headers={"X-User-Id": str(user_id)},
+                timeout=5.0
+            )
+            if response.status_code != status.HTTP_200_OK:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=response.json().get("detail", "Matcher service error")
+                )
+            return response.json()
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Matcher Service Unavailable: {exc}"
+            )
 
 # ==========================================
 # PROJECTS & PROFILE ME ROUTING

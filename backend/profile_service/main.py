@@ -17,7 +17,8 @@ from profile_service.database import (
     get_user_by_id,
     get_profile_by_user_id,
     create_or_update_profile,
-    add_project
+    add_project,
+    get_all_profiles
 )
 from profile_service.schemas import (
     UserRegister,
@@ -161,6 +162,35 @@ def get_my_profile(x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
             detail="Invalid X-User-Id header format."
         )
     return fetch_profile_by_user_id_or_default(user_id)
+
+@app.get("/api/v1/profiles", response_model=List[ProfileResponse])
+def get_profiles_endpoint():
+    """Retrieves all user profiles in the system (used for Matcher Service discovery)."""
+    raw_profiles = get_all_profiles()
+    profiles_list = []
+    for raw in raw_profiles:
+        # Construct UserResponse model
+        user_data = UserResponse(
+            id=raw["user_id"],
+            email=raw["email"],
+            name=raw["name"]
+        )
+        
+        # Build ProfileResponse
+        profiles_list.append(
+            ProfileResponse(
+                user_id=raw["user_id"],
+                user=user_data,
+                age=raw["age"],
+                distance=raw["distance"],
+                bio=raw["bio"],
+                image=raw["image"],
+                interests=raw["interests"],
+                looking_for=raw["looking_for"],
+                radius_limit=raw["radius_limit"]
+            )
+        )
+    return profiles_list
 
 @app.get("/api/v1/profiles/{user_id}", response_model=ProfileResponse)
 def get_profile_by_id_endpoint(user_id: int):
