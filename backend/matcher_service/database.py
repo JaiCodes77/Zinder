@@ -3,7 +3,10 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Generator, List, Dict, Any, Optional
 
-DB_PATH = "/Users/jaipandey/Desktop/projects/zinder/backend/data/matcher.db"
+# Resolved relative to the backend package root (backend/data/matcher.db) so the
+# service runs identically regardless of the current working directory or host machine.
+_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.getenv("MATCHER_DB_PATH", os.path.join(_BACKEND_ROOT, "data", "matcher.db"))
 
 @contextmanager
 def get_db_conn() -> Generator[sqlite3.Connection, None, None]:

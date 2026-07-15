@@ -6,7 +6,7 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
   return (
-    <main className="w-full min-h-screen bg-[#090d16]">
+    <main className="w-full min-h-screen bg-ink-950">
       {isAuthenticated ? (
         <DiscoveryPage onLogout={() => setIsAuthenticated(false)} />
       ) : (

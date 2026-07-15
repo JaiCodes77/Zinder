@@ -4,8 +4,11 @@ import json
 from contextlib import contextmanager
 from typing import Generator, List, Dict, Any, Optional
 
-# The local SQLite database path for Profile Service
-DB_PATH = "/Users/jaipandey/Desktop/projects/zinder/backend/data/profile.db"
+# The local SQLite database path for Profile Service.
+# Resolved relative to the backend package root (backend/data/profile.db) so the
+# service runs identically regardless of the current working directory or host machine.
+_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.getenv("PROFILE_DB_PATH", os.path.join(_BACKEND_ROOT, "data", "profile.db"))
 
 @contextmanager
 def get_db_conn() -> Generator[sqlite3.Connection, None, None]:

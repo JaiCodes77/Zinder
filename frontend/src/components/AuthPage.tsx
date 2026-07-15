@@ -1,30 +1,16 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Mail, 
-  Lock, 
-  User, 
-  Eye, 
-  EyeOff, 
-  Loader2, 
-  CheckCircle2, 
-  AlertCircle, 
-  Sparkles,
-  ArrowRight,
-  ShieldCheck
-} from 'lucide-react';
-
-// ==========================================
+import { Eye, EyeOff, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { GatewayNetwork } from './GatewayNetwork';
 
 // ==========================================
-// VALIDATION HELPER FUNCTIONS
+// VALIDATION HELPERS
 // ==========================================
 const validateEmail = (email: string): string | null => {
-  if (!email) return 'Email or username is required';
+  if (!email) return 'Email is required';
   if (email.includes('@')) {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) return 'Please enter a valid email address';
+    if (!emailRegex.test(email)) return 'Enter a valid email address';
   } else {
     if (email.length < 3) return 'Username must be at least 3 characters';
   }
@@ -38,10 +24,28 @@ const validatePassword = (password: string): string | null => {
 };
 
 const validateName = (name: string): string | null => {
-  if (!name) return 'Full name is required';
+  if (!name) return 'Name is required';
   if (name.trim().length < 2) return 'Name must be at least 2 characters';
   return null;
 };
+
+// ==========================================
+// NARRATIVE PIECES
+// ==========================================
+const lineReveal = {
+  hidden: { opacity: 0, y: 26 },
+  show: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: 0.15 + i * 0.14, duration: 0.7, ease: [0.16, 1, 0.3, 1] as const },
+  }),
+};
+
+const COMMITS = [
+  { hash: 'a30f9c2', msg: 'you arrive, stack in hand' },
+  { hash: '7d21e4b', msg: 'someone likes your architecture' },
+  { hash: 'f96b0aa', msg: 'merge: two roadmaps become one' },
+];
 
 // ==========================================
 // MAIN COMPONENT
@@ -56,7 +60,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // Form Field States
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailTouched, setEmailTouched] = useState(false);
@@ -69,10 +72,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
   const [nameError, setNameError] = useState<string | null>(null);
   const [nameTouched, setNameTouched] = useState(false);
 
-  // Focus tracking for card glow colors
-  const [focusedField, setFocusedField] = useState<'email' | 'password' | 'name' | null>(null);
-
-  // Reset errors and fields on toggle
   const toggleView = () => {
     setIsLogin(!isLogin);
     setEmailError(null);
@@ -84,53 +83,39 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
     setToastMessage(null);
   };
 
-  // Field Blur Event Handlers (Trigger Validation)
   const handleEmailBlur = () => {
     setEmailTouched(true);
     setEmailError(validateEmail(email));
-    setFocusedField(null);
   };
 
   const handlePasswordBlur = () => {
     setPasswordTouched(true);
     setPasswordError(validatePassword(password));
-    setFocusedField(null);
   };
 
   const handleNameBlur = () => {
     setNameTouched(true);
     setNameError(validateName(name));
-    setFocusedField(null);
   };
 
-  // Field Change Event Handlers (Clear errors as user types)
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setEmail(e.target.value);
-    if (emailTouched) {
-      // Re-validate dynamically to clear error if resolved
-      setEmailError(validateEmail(e.target.value));
-    }
+    if (emailTouched) setEmailError(validateEmail(e.target.value));
   };
 
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setPassword(e.target.value);
-    if (passwordTouched) {
-      setPasswordError(validatePassword(e.target.value));
-    }
+    if (passwordTouched) setPasswordError(validatePassword(e.target.value));
   };
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setName(e.target.value);
-    if (nameTouched) {
-      setNameError(validateName(e.target.value));
-    }
+    if (nameTouched) setNameError(validateName(e.target.value));
   };
 
-  // Form Submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Trigger all validations
     const eErr = validateEmail(email);
     const pErr = validatePassword(password);
     const nErr = !isLogin ? validateName(name) : null;
@@ -142,406 +127,363 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
     setPasswordTouched(true);
     setNameTouched(true);
 
-    if (eErr || pErr || nErr) {
-      setToastMessage({ text: 'Please resolve errors in the form.', type: 'error' });
-      return;
-    }
+    if (eErr || pErr || nErr) return;
 
     setIsLoading(true);
     setToastMessage(null);
 
     try {
-      const url = isLogin 
-        ? 'http://localhost:8080/api/v1/auth/login' 
+      const url = isLogin
+        ? 'http://localhost:8080/api/v1/auth/login'
         : 'http://localhost:8080/api/v1/auth/register';
-      
-      const body = isLogin 
-        ? { email, password } 
-        : { email, password, name };
+
+      const body = isLogin ? { email, password } : { email, password, name };
 
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        credentials: 'include', // Ensure credentials/cookies are stored and sent
+        credentials: 'include',
       });
 
       if (!response.ok) {
-        let errorDetail = 'Authentication failed. Please try again.';
+        let errorDetail = 'Something went wrong. Please try again.';
         try {
           const data = await response.json();
-          if (data && data.detail) {
-            errorDetail = data.detail;
-          } else if (data && data.message) {
-            errorDetail = data.message;
-          }
-        } catch (e) {
-          // ignore
+          if (data && data.detail) errorDetail = data.detail;
+          else if (data && data.message) errorDetail = data.message;
+        } catch {
+          // ignore parse failure, keep generic message
         }
         throw new Error(errorDetail);
       }
-      
+
       if (isLogin) {
-        setToastMessage({ 
-          text: `Welcome back! Gateway authorization successful. Session token stored.`, 
-          type: 'success' 
-        });
+        setToastMessage({ text: 'Signed in. Your story continues…', type: 'success' });
         setTimeout(() => {
           onLoginSuccess();
-        }, 1500);
+        }, 900);
       } else {
-        setToastMessage({ 
-          text: `Account created successfully! Welcome to Zinder.`, 
-          type: 'success' 
-        });
-        // Auto-switch to login after signup success
+        setToastMessage({ text: 'Account created — sign in to begin.', type: 'success' });
         setTimeout(() => {
           setIsLogin(true);
           setToastMessage(null);
           setPassword('');
           setPasswordTouched(false);
-        }, 2500);
+        }, 1800);
       }
     } catch (error: any) {
-      setToastMessage({ text: error.message || 'Authentication failed. Please try again.', type: 'error' });
+      setToastMessage({ text: error.message || 'Something went wrong. Please try again.', type: 'error' });
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Dynamic card border glow based on active focus
-  const getGlowClass = () => {
-    if (focusedField === 'email') return 'shadow-[0_0_50px_rgba(6,182,212,0.15)] border-brand-teal/30';
-    if (focusedField === 'name') return 'shadow-[0_0_50px_rgba(139,92,246,0.15)] border-brand-purple/30';
-    if (focusedField === 'password') return 'shadow-[0_0_50px_rgba(236,72,153,0.15)] border-brand-magenta/30';
-    return 'shadow-2xl border-white/5';
-  };
+  const inputClass = (touched: boolean, error: string | null) =>
+    `field w-full px-3.5 py-2.5 text-sm text-fg placeholder-fg-subtle focus:outline-none ${
+      touched && error ? 'field-error' : ''
+    }`;
 
   return (
-    <div className="relative min-h-screen w-full flex items-center justify-center bg-[#070b12] px-4 py-12 overflow-hidden select-none">
-      
-      {/* Background Animated Layers */}
+    <div className="relative min-h-screen w-full bg-ink-950 lg:grid lg:grid-cols-[1.1fr_1fr]">
       <GatewayNetwork />
-      
-      {/* Floating Ambient Orbs */}
-      <div className="absolute top-[10%] left-[15%] w-80 h-80 rounded-full bg-brand-teal/10 blur-[100px] animate-orb-slow pointer-events-none" />
-      <div className="absolute bottom-[10%] right-[15%] w-96 h-96 rounded-full bg-brand-magenta/10 blur-[120px] animate-orb-slow [animation-delay:4s] pointer-events-none" />
-      <div className="absolute top-[40%] right-[20%] w-72 h-72 rounded-full bg-brand-purple/10 blur-[110px] animate-orb-slow [animation-delay:8s] pointer-events-none" />
 
-      {/* Glassmorphic Auth Container */}
-      <motion.div 
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-        className={`relative w-full max-w-[460px] glass-card rounded-3xl p-8 md:p-10 z-10 transition-all duration-500 ease-out border ${getGlowClass()}`}
-      >
-        
-        {/* Gateway Pulsing Logo */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="relative flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-brand-purple to-brand-magenta p-[2px] shadow-[0_0_30px_rgba(236,72,153,0.3)] group cursor-pointer">
-            <div className="flex items-center justify-center w-full h-full bg-[#0a0f1e] rounded-2xl transition-all duration-300 group-hover:bg-transparent">
-              <Sparkles className="w-8 h-8 text-white group-hover:scale-110 transition-transform duration-300" />
-            </div>
-            {/* Pulsing ring outer */}
-            <div className="absolute -inset-1 rounded-3xl bg-gradient-to-tr from-brand-purple to-brand-magenta opacity-30 blur-md group-hover:opacity-75 transition-opacity duration-300 animate-pulse-slow" />
+      {/* ==========================================
+          LEFT — THE PROLOGUE
+          ========================================== */}
+      <section className="relative z-10 hidden lg:flex flex-col justify-between p-12 xl:p-16 border-r rule">
+        {/* Masthead */}
+        <div className="flex items-center gap-3">
+          <div className="brand-mark w-8 h-8 rounded-lg flex items-center justify-center">
+            <span className="text-[15px] font-bold text-ink-950 leading-none select-none display">Z</span>
           </div>
-          
-          <h1 className="mt-6 text-3xl font-bold tracking-tight bg-gradient-to-r from-white via-zinc-200 to-zinc-400 bg-clip-text text-transparent">
-            ZINDER
+          <span className="display text-[19px] text-fg">Zinder</span>
+        </div>
+
+        {/* Manifesto */}
+        <div className="max-w-xl">
+          <motion.p
+            custom={0}
+            variants={lineReveal}
+            initial="hidden"
+            animate="show"
+            className="kicker mb-8"
+          >
+            Prologue · N°01
+          </motion.p>
+
+          <h1 className="text-[56px] xl:text-[68px] leading-[1.04]">
+            <motion.span custom={1} variants={lineReveal} initial="hidden" animate="show" className="display block text-fg">
+              Every great build
+            </motion.span>
+            <motion.span custom={2} variants={lineReveal} initial="hidden" animate="show" className="display block text-fg">
+              begins with
+            </motion.span>
+            <motion.span custom={3} variants={lineReveal} initial="hidden" animate="show" className="display-italic block text-gradient-brand">
+              a match.
+            </motion.span>
           </h1>
-          <p className="text-zinc-500 text-xs tracking-[0.2em] font-medium uppercase mt-1">
-            Microservices dating gateway
+
+          {/* Commit log marginalia */}
+          <div className="mt-12 space-y-2.5">
+            {COMMITS.map((c, i) => (
+              <motion.p
+                key={c.hash}
+                custom={4 + i}
+                variants={lineReveal}
+                initial="hidden"
+                animate="show"
+                className="font-mono text-xs text-fg-subtle"
+              >
+                <span className="text-accent/70">{c.hash}</span>
+                <span className="mx-2 text-fg-subtle/50">—</span>
+                {c.msg}
+              </motion.p>
+            ))}
+          </div>
+        </div>
+
+        {/* Foot meta */}
+        <motion.div
+          custom={8}
+          variants={lineReveal}
+          initial="hidden"
+          animate="show"
+          className="flex items-end justify-between"
+        >
+          <p className="text-sm text-fg-muted max-w-[300px] leading-relaxed">
+            For developers who would rather not build alone.
+          </p>
+          <p className="mono-label">est. 2026 · localhost</p>
+        </motion.div>
+      </section>
+
+      {/* ==========================================
+          RIGHT — THE SIGNATURE PAGE
+          ========================================== */}
+      <section className="relative z-10 min-h-screen flex flex-col items-center justify-center px-4 py-12">
+        {/* Compact masthead for mobile */}
+        <div className="lg:hidden flex flex-col items-center mb-8 text-center">
+          <div className="brand-mark w-10 h-10 rounded-xl flex items-center justify-center">
+            <span className="text-[18px] font-bold text-ink-950 leading-none select-none display">Z</span>
+          </div>
+          <p className="display text-2xl text-fg mt-4">
+            Every great build begins with <span className="display-italic text-gradient-brand">a match.</span>
           </p>
         </div>
 
-        {/* View Toggle Header */}
-        <div className="flex justify-center mb-8 bg-zinc-950/60 p-1.5 rounded-xl border border-white/5">
-          <button 
-            type="button"
-            onClick={() => !isLogin && toggleView()}
-            className={`flex-1 text-center py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
-              isLogin 
-                ? 'bg-gradient-to-r from-brand-teal/20 to-brand-purple/20 text-brand-teal border border-brand-teal/20' 
-                : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-            }`}
-          >
-            Sign In
-          </button>
-          <button 
-            type="button"
-            onClick={() => isLogin && toggleView()}
-            className={`flex-1 text-center py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
-              !isLogin 
-                ? 'bg-gradient-to-r from-brand-purple/20 to-brand-magenta/20 text-brand-magenta border border-brand-magenta/20' 
-                : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-            }`}
-          >
-            Create Account
-          </button>
-        </div>
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full max-w-[400px]"
+        >
+          <div className="mb-7">
+            <p className="kicker mb-3">{isLogin ? 'Returning reader' : 'New character'}</p>
+            <h2 className="display text-[32px] leading-tight text-fg">
+              {isLogin ? 'Welcome back.' : 'Join the story.'}
+            </h2>
+            <p className="mt-2 text-sm text-fg-muted">
+              {isLogin ? 'Sign in to pick up where you left off.' : 'Meet developers. Build together.'}
+            </p>
+          </div>
 
-        {/* Status Alerts / Toast */}
-        <AnimatePresence mode="wait">
-          {toastMessage && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className={`p-4 rounded-xl flex items-start gap-3 mb-6 text-sm ${
-                toastMessage.type === 'success' 
-                  ? 'bg-green-500/10 border border-green-500/20 text-green-400' 
-                  : 'bg-red-500/10 border border-red-500/20 text-red-400'
-              }`}
-            >
-              {toastMessage.type === 'success' ? (
-                <ShieldCheck className="w-5 h-5 flex-shrink-0 mt-0.5" />
-              ) : (
-                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-              )}
-              <span>{toastMessage.text}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Main Authentication Form */}
-        <form onSubmit={handleSubmit} noValidate>
+          {/* Status message */}
           <AnimatePresence mode="wait">
-            <motion.div
-              key={isLogin ? 'login' : 'signup'}
-              initial={{ opacity: 0, x: isLogin ? -15 : 15 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: isLogin ? 15 : -15 }}
-              transition={{ duration: 0.25 }}
-              className="space-y-5"
-            >
-              <h2 className="text-xl font-bold text-white mb-2">
-                {isLogin ? 'Welcome Back' : 'Get Connected'}
-              </h2>
+            {toastMessage && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.18 }}
+                role="status"
+                className={`px-3.5 py-3 rounded-lg flex items-start gap-2.5 mb-5 text-[13px] leading-snug border ${
+                  toastMessage.type === 'success'
+                    ? 'bg-like/8 border-like/20 text-like'
+                    : 'bg-pass/8 border-pass/20 text-pass'
+                }`}
+              >
+                {toastMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-px" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-px" />
+                )}
+                <span>{toastMessage.text}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-              {/* Sign Up: Full Name field */}
-              {!isLogin && (
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="fullname" className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">
-                    Full Name
-                  </label>
-                  <div className="relative">
-                    <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
-                    <input 
+          <form onSubmit={handleSubmit} noValidate>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={isLogin ? 'login' : 'signup'}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="space-y-4"
+              >
+                {!isLogin && (
+                  <div className="space-y-1.5">
+                    <label htmlFor="fullname" className="block text-[13px] font-medium text-fg-muted">
+                      Full name
+                    </label>
+                    <input
                       id="fullname"
                       name="name"
                       type="text"
-                      placeholder="Jane Doe"
+                      placeholder="Ada Lovelace"
                       value={name}
                       onChange={handleNameChange}
                       onBlur={handleNameBlur}
-                      onFocus={() => setFocusedField('name')}
                       disabled={isLoading}
                       required
                       autoComplete="name"
-                      className={`w-full glass-input rounded-xl pl-11 pr-10 py-3.5 text-sm text-white placeholder-zinc-600 focus:outline-none ${
-                        nameTouched && nameError ? 'input-error' : nameTouched && !nameError ? 'input-success' : ''
-                      }`}
+                      className={inputClass(nameTouched, nameError)}
                     />
-                    <div className="absolute right-3.5 top-1/2 -translate-y-1/2 flex items-center">
-                      {nameTouched && nameError && <AlertCircle className="w-5 h-5 text-red-500" />}
-                      {nameTouched && !nameError && name.length > 0 && <CheckCircle2 className="w-5 h-5 text-green-500" />}
-                    </div>
+                    {nameTouched && nameError && <p className="text-xs text-pass pt-0.5">{nameError}</p>}
                   </div>
-                  {nameTouched && nameError && (
-                    <span className="text-xs text-red-400 flex items-center gap-1 mt-0.5">
-                      <AlertCircle className="w-3.5 h-3.5" /> {nameError}
-                    </span>
-                  )}
-                </div>
-              )}
+                )}
 
-              {/* Email / Username field */}
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="email" className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">
-                  Email or Username
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
-                  <input 
+                <div className="space-y-1.5">
+                  <label htmlFor="email" className="block text-[13px] font-medium text-fg-muted">
+                    Email
+                  </label>
+                  <input
                     id="email"
                     name="email"
                     type="text"
-                    placeholder="email@example.com"
+                    placeholder="you@example.com"
                     value={email}
                     onChange={handleEmailChange}
                     onBlur={handleEmailBlur}
-                    onFocus={() => setFocusedField('email')}
                     disabled={isLoading}
                     required
                     autoComplete="username"
-                    className={`w-full glass-input rounded-xl pl-11 pr-10 py-3.5 text-sm text-white placeholder-zinc-600 focus:outline-none ${
-                      emailTouched && emailError ? 'input-error' : emailTouched && !emailError ? 'input-success' : ''
-                    }`}
+                    className={inputClass(emailTouched, emailError)}
                   />
-                  <div className="absolute right-3.5 top-1/2 -translate-y-1/2 flex items-center">
-                    {emailTouched && emailError && <AlertCircle className="w-5 h-5 text-red-500" />}
-                    {emailTouched && !emailError && email.length > 0 && <CheckCircle2 className="w-5 h-5 text-green-500" />}
-                  </div>
+                  {emailTouched && emailError && <p className="text-xs text-pass pt-0.5">{emailError}</p>}
                 </div>
-                {emailTouched && emailError && (
-                  <span className="text-xs text-red-400 flex items-center gap-1 mt-0.5">
-                    <AlertCircle className="w-3.5 h-3.5" /> {emailError}
-                  </span>
-                )}
-              </div>
 
-              {/* Password field */}
-              <div className="flex flex-col gap-1.5">
-                <div className="flex justify-between items-center">
-                  <label htmlFor="password" className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">
-                    Password
-                  </label>
-                  {isLogin && (
-                    <a 
-                      href="#forgot" 
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setToastMessage({ text: 'Password reset link dispatched.', type: 'success' });
-                      }}
-                      className="text-xs font-semibold text-brand-teal-light hover:text-brand-teal hover:underline transition-colors"
-                    >
-                      Forgot?
-                    </a>
-                  )}
-                </div>
-                <div className="relative">
-                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
-                  <input 
-                    id="password"
-                    name="password"
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={handlePasswordChange}
-                    onBlur={handlePasswordBlur}
-                    onFocus={() => setFocusedField('password')}
-                    disabled={isLoading}
-                    required
-                    autoComplete={isLogin ? 'current-password' : 'new-password'}
-                    className={`w-full glass-input rounded-xl pl-11 pr-20 py-3.5 text-sm text-white placeholder-zinc-600 focus:outline-none ${
-                      passwordTouched && passwordError ? 'input-error' : passwordTouched && !passwordError ? 'input-success' : ''
-                    }`}
-                  />
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="password" className="block text-[13px] font-medium text-fg-muted">
+                      Password
+                    </label>
+                    {isLogin && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setToastMessage({ text: 'Password reset isn’t available in this preview.', type: 'error' })
+                        }
+                        className="text-xs font-medium text-fg-subtle hover:text-accent transition-colors"
+                      >
+                        Forgot password?
+                      </button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <input
+                      id="password"
+                      name="password"
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder={isLogin ? 'Your password' : 'At least 8 characters'}
+                      value={password}
+                      onChange={handlePasswordChange}
+                      onBlur={handlePasswordBlur}
+                      disabled={isLoading}
+                      required
+                      autoComplete={isLogin ? 'current-password' : 'new-password'}
+                      className={`${inputClass(passwordTouched, passwordError)} pr-10`}
+                    />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
                       tabIndex={-1}
-                      className="p-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-colors focus:outline-none"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-fg-subtle hover:text-fg-muted transition-colors"
                     >
-                      {showPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
-                    {passwordTouched && passwordError && <AlertCircle className="w-5 h-5 text-red-500" />}
-                    {passwordTouched && !passwordError && password.length > 0 && <CheckCircle2 className="w-5 h-5 text-green-500" />}
                   </div>
+                  {passwordTouched && passwordError && (
+                    <p className="text-xs text-pass pt-0.5">{passwordError}</p>
+                  )}
                 </div>
-                {passwordTouched && passwordError ? (
-                  <span className="text-xs text-red-400 flex items-center gap-1 mt-0.5">
-                    <AlertCircle className="w-3.5 h-3.5" /> {passwordError}
-                  </span>
-                ) : (
-                  !isLogin && (
-                    <span className="text-[10px] text-zinc-500 mt-0.5 block">
-                      Must be at least 8 characters.
-                    </span>
-                  )
-                )}
-              </div>
-            </motion.div>
-          </AnimatePresence>
+              </motion.div>
+            </AnimatePresence>
 
-          {/* Primary CTA Submit Button */}
-          <div className="mt-8">
-            <motion.button
+            <button
               type="submit"
               disabled={isLoading}
-              whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.98 }}
-              className={`relative w-full py-4 px-6 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-2 overflow-hidden shadow-lg transition-all duration-300 ${
-                isLogin 
-                  ? 'bg-gradient-to-r from-brand-teal via-brand-purple to-brand-magenta hover:shadow-[0_0_24px_rgba(6,182,212,0.4)]' 
-                  : 'bg-gradient-to-r from-brand-magenta via-brand-purple to-brand-teal hover:shadow-[0_0_24px_rgba(236,72,153,0.4)]'
-              }`}
+              className="btn-primary w-full mt-6 py-2.5 px-4 rounded-lg text-sm flex items-center justify-center gap-2"
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Connecting Gateway...</span>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>{isLogin ? 'Signing in…' : 'Creating account…'}</span>
                 </>
               ) : (
-                <>
-                  <span>{isLogin ? 'Access Account' : 'Initialize Session'}</span>
-                  <ArrowRight className="w-4 h-4 mt-[1px]" />
-                </>
+                <span>{isLogin ? 'Sign in' : 'Create account'}</span>
               )}
-              {/* Sleek reflection overlay effect on hover */}
-              <div className="absolute inset-0 bg-white/10 opacity-0 hover:opacity-100 transition-opacity duration-300" />
-            </motion.button>
-          </div>
-        </form>
+            </button>
+          </form>
 
-        {/* OAuth Dividers & Social Row */}
-        <div className="mt-8 flex flex-col items-center">
-          <div className="flex items-center w-full mb-6">
-            <div className="flex-1 h-[1px] bg-white/10" />
-            <span className="px-4 text-[10px] uppercase tracking-wider font-semibold text-zinc-500">
-              Gateway Identity
-            </span>
-            <div className="flex-1 h-[1px] bg-white/10" />
+          {/* Divider */}
+          <div className="flex items-center gap-3 my-5">
+            <div className="flex-1 h-px bg-fg/8" />
+            <span className="text-[11px] font-medium text-fg-subtle">or</span>
+            <div className="flex-1 h-px bg-fg/8" />
           </div>
 
-          <div className="flex gap-4 w-full">
-            <motion.button
+          {/* SSO */}
+          <div className="grid grid-cols-2 gap-3">
+            <button
               type="button"
-              whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.96 }}
-              onClick={() => {
-                setToastMessage({ text: 'Apple OAuth redirection simulated.', type: 'success' });
-              }}
-              className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-white/5 bg-zinc-950/40 hover:bg-zinc-900/60 text-sm font-medium transition-all"
+              onClick={() =>
+                setToastMessage({ text: 'Single sign-on isn’t available in this preview.', type: 'error' })
+              }
+              className="btn-ghost flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-[13px]"
             >
-              <svg className="w-4 h-4 fill-white" viewBox="0 0 24 24">
-                <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.54 9.103 1.51 12.06 1.005 1.45 2.176 3.078 3.75 3.014 1.52-.062 2.09-.98 3.93-.98 1.83 0 2.365.98 3.96.948 1.627-.027 2.66-1.478 3.655-2.92 1.157-1.688 1.63-3.325 1.66-3.418-.03-.01-3.178-1.22-3.21-4.816-.026-3.003 2.46-4.444 2.574-4.515-1.41-2.063-3.582-2.29-4.35-2.35-2.072-.167-3.308.766-4.158.766zM15.93 3.559c.813-1.002 1.35-2.387 1.2-3.774-1.19.048-2.63.792-3.483 1.79-.766.88-1.436 2.293-1.258 3.653 1.325.1 2.695-.694 3.54-1.67z" />
+              <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden>
+                <path
+                  fill="currentColor"
+                  d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.54 9.103 1.51 12.06 1.005 1.45 2.176 3.078 3.75 3.014 1.52-.062 2.09-.98 3.93-.98 1.83 0 2.365.98 3.96.948 1.627-.027 2.66-1.478 3.655-2.92 1.157-1.688 1.63-3.325 1.66-3.418-.03-.01-3.178-1.22-3.21-4.816-.026-3.003 2.46-4.444 2.574-4.515-1.41-2.063-3.582-2.29-4.35-2.35-2.072-.167-3.308.766-4.158.766zM15.93 3.559c.813-1.002 1.35-2.387 1.2-3.774-1.19.048-2.63.792-3.483 1.79-.766.88-1.436 2.293-1.258 3.653 1.325.1 2.695-.694 3.54-1.67z"
+                />
               </svg>
-              <span>Apple ID</span>
-            </motion.button>
-            
-            <motion.button
+              <span>Apple</span>
+            </button>
+
+            <button
               type="button"
-              whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.96 }}
-              onClick={() => {
-                setToastMessage({ text: 'Google OAuth redirection simulated.', type: 'success' });
-              }}
-              className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-white/5 bg-zinc-950/40 hover:bg-zinc-900/60 text-sm font-medium transition-all"
+              onClick={() =>
+                setToastMessage({ text: 'Single sign-on isn’t available in this preview.', type: 'error' })
+              }
+              className="btn-ghost flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-[13px]"
             >
-              <svg className="w-4 h-4 fill-white" viewBox="0 0 24 24">
-                <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.51 0-6.355-2.845-6.355-6.355s2.845-6.355 6.355-6.355c1.61 0 3.076.61 4.205 1.61l3.123-3.123C19.11 1.79 15.89 0 12.24 0 5.48 0 0 5.48 0 12.24s5.48 12.24 12.24 12.24c6.88 0 12.24-5.48 12.24-12.24 0-.82-.08-1.61-.24-2.385H12.24z" />
+              <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden>
+                <path
+                  fill="currentColor"
+                  d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.51 0-6.355-2.845-6.355-6.355s2.845-6.355 6.355-6.355c1.61 0 3.076.61 4.205 1.61l3.123-3.123C19.11 1.79 15.89 0 12.24 0 5.48 0 0 5.48 0 12.24s5.48 12.24 12.24 12.24c6.88 0 12.24-5.48 12.24-12.24 0-.82-.08-1.61-.24-2.385H12.24z"
+                />
               </svg>
               <span>Google</span>
-            </motion.button>
+            </button>
           </div>
-        </div>
 
-        {/* Microservices Node Status Footer */}
-        <div className="mt-8 pt-6 border-t border-white/5 flex justify-between items-center text-[10px] text-zinc-500 tracking-wide font-medium">
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-ping" />
-            <span>GATEWAY-SSL ACTIVE</span>
-          </div>
-          <div className="text-right">
-            <span>v1.2.0-PROD</span>
-          </div>
-        </div>
-
-      </motion.div>
+          {/* Toggle */}
+          <p className="mt-7 text-center text-sm text-fg-muted">
+            {isLogin ? 'New to Zinder?' : 'Already have an account?'}{' '}
+            <button
+              type="button"
+              onClick={toggleView}
+              className="font-medium text-accent hover:text-accent-bright transition-colors"
+            >
+              {isLogin ? 'Create an account' : 'Sign in'}
+            </button>
+          </p>
+        </motion.div>
+      </section>
     </div>
   );
 };
