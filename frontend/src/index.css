@@ -1,47 +1,77 @@
 @import 'tailwindcss';
 
 /* ==========================================================================
-   Zinder — a story in four chapters
-   Cinematic editorial dark theme: warm ink, paper-cream text, one ember
-   accent. Fraunces carries the narrative voice; Inter does the work;
-   JetBrains Mono keeps the developer's marginalia.
+   Zinder — Frosted Ledger
+   Ink-navy glass, warm amber trust, cool teal for live states only.
+   Fraunces for match/hero moments; Inter for UI; IBM Plex Mono for utility.
    ========================================================================== */
 
 @theme {
   /* Type */
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-display: 'Fraunces Variable', Georgia, 'Times New Roman', serif;
-  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  /* Ink — warm near-black paper-in-candlelight scale */
-  --color-ink-950: #0d0a08;
-  --color-ink-900: #141009;
-  --color-ink-850: #1a1510;
-  --color-ink-800: #211a14;
-  --color-ink-750: #2a221a;
+  /* Frosted Ledger core */
+  --color-bg-base: #0a0d14;
+  --color-surface-glass: rgb(255 255 255 / 0.06);
+  --color-surface-glass-raised: rgb(255 255 255 / 0.1);
+  --color-accent-warm: #e8a659;
+  --color-accent-cool: #5eead4;
+  --color-text-primary: #f5f3ee;
+  --color-text-muted: #8b93a7;
+  --color-danger: #e8654f;
 
-  /* Text — cream, not white */
-  --color-fg: #f2ecdf;
-  --color-fg-muted: #b0a494;
-  --color-fg-subtle: #746a5c;
+  /* Tailwind-facing aliases (existing class names keep working) */
+  --color-ink-950: #0a0d14;
+  --color-ink-900: #10141e;
+  --color-ink-850: #151a26;
+  --color-ink-800: #1a2130;
+  --color-ink-750: #222a3a;
 
-  /* Ember — the single accent; gold is its gradient partner */
-  --color-accent: #ff7a5c;
-  --color-accent-bright: #ffb09b;
-  --color-accent-deep: #d95a3e;
-  --color-brand-gold: #d9a13f;
+  --color-fg: #f5f3ee;
+  --color-fg-muted: #8b93a7;
+  --color-fg-subtle: #6b7389;
 
-  /* Semantics */
-  --color-like: #85d8a5;
-  --color-pass: #f08080;
-  --color-super: #c0aaf7;
+  --color-accent: #e8a659;
+  --color-accent-bright: #f0bc7a;
+  --color-accent-deep: #c4883a;
+  --color-brand-gold: #e8a659;
+  --color-brand-violet: #5eead4; /* legacy class name → cool accent, not violet */
 
-  --animate-fade-up: fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  /* Semantics — warm for like/match, cool for online, muted coral for pass */
+  --color-like: #e8a659;
+  --color-pass: #e8654f;
+  --color-super: #5eead4;
+
+  --animate-fade-up: fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+  --ease-ledger: cubic-bezier(0.22, 1, 0.36, 1);
 
   @keyframes fade-up {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
   }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+}
+
+:root {
+  --bg-base: #0a0d14;
+  --surface-glass: rgba(255, 255, 255, 0.06);
+  --surface-glass-raised: rgba(255, 255, 255, 0.1);
+  --accent-warm: #e8a659;
+  --accent-cool: #5eead4;
+  --text-primary: #f5f3ee;
+  --text-muted: #8b93a7;
+  --danger: #e8654f;
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --ease-ledger: cubic-bezier(0.22, 1, 0.36, 1);
+  --radius-glass: 18px;
+  --blur-glass: 20px;
 }
 
 @layer base {
@@ -50,20 +80,36 @@
   }
 
   body {
-    @apply bg-ink-950 text-fg antialiased overflow-x-hidden;
+    @apply bg-bg-base text-text-primary antialiased overflow-x-hidden;
     font-family: var(--font-sans);
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     letter-spacing: -0.011em;
   }
 
   ::selection {
-    background: rgba(255, 122, 92, 0.28);
-    color: #ffe9de;
+    background: rgba(232, 166, 89, 0.28);
+    color: #fff6e8;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgba(232, 166, 89, 0.7);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
 /* --------------------------------------------------------------------------
-   Narrative voice — display serif helpers
+   Narrative voice — display serif helpers (match reveals / hero only)
    -------------------------------------------------------------------------- */
 .display {
   font-family: var(--font-display);
@@ -80,7 +126,7 @@
   font-weight: 430;
 }
 
-/* Mono marginalia — kickers, chapter numbers, annotations */
+/* Mono utility — timestamps, IDs, distances, status codes */
 .kicker {
   font-family: var(--font-mono);
   font-size: 0.6875rem;
@@ -97,9 +143,8 @@
   color: var(--color-fg-subtle);
 }
 
-/* Hairline rules, like a printed page */
 .rule {
-  border-color: rgba(242, 236, 223, 0.09);
+  border-color: var(--glass-border);
 }
 
 /* --------------------------------------------------------------------------
@@ -113,87 +158,119 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(242, 236, 223, 0.08);
+  background: rgba(245, 243, 238, 0.08);
   border-radius: 9999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(242, 236, 223, 0.16);
+  background: rgba(245, 243, 238, 0.16);
   background-clip: content-box;
   border: 2px solid transparent;
 }
 
 /* --------------------------------------------------------------------------
-   Surfaces
+   Glass surfaces — Frosted Ledger signature
    -------------------------------------------------------------------------- */
+.glass {
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-glass);
+}
+
+.glass-raised {
+  background: var(--surface-glass-raised);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-glass);
+}
+
+/* Legacy .card → glass panel (same footprint for existing markup) */
 .card {
-  background: linear-gradient(180deg, rgba(242, 236, 223, 0.028) 0%, rgba(242, 236, 223, 0.008) 100%), var(--color-ink-900);
-  border: 1px solid rgba(242, 236, 223, 0.09);
-  box-shadow:
-    0 1px 1px rgba(0, 0, 0, 0.35),
-    0 12px 32px -12px rgba(0, 0, 0, 0.6);
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  border: 1px solid var(--glass-border);
+  box-shadow: none;
 }
 
 .card-hover {
-  transition: border-color 0.18s ease, transform 0.18s ease;
+  transition: border-color 0.2s var(--ease-ledger), background-color 0.2s var(--ease-ledger);
 }
 .card-hover:hover {
-  border-color: rgba(242, 236, 223, 0.18);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: var(--surface-glass-raised);
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.1) 45%,
+    rgba(255, 255, 255, 0.04) 90%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 12px;
 }
 
 /* --------------------------------------------------------------------------
    Form controls
    -------------------------------------------------------------------------- */
 .field {
-  background: rgba(242, 236, 223, 0.03);
-  border: 1px solid rgba(242, 236, 223, 0.1);
-  border-radius: 8px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  background: var(--surface-glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  transition: border-color 0.15s var(--ease-ledger), box-shadow 0.15s var(--ease-ledger),
+    background-color 0.15s var(--ease-ledger);
 }
 
 .field:hover:not(:focus):not(:disabled) {
-  border-color: rgba(242, 236, 223, 0.18);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .field:focus,
 .field:focus-within {
-  background: rgba(242, 236, 223, 0.045);
-  border-color: rgba(255, 122, 92, 0.55);
-  box-shadow: 0 0 0 3px rgba(255, 122, 92, 0.13);
+  background: var(--surface-glass-raised);
+  border-color: rgba(232, 166, 89, 0.55);
+  box-shadow: 0 0 0 3px rgba(232, 166, 89, 0.12);
   outline: none;
 }
 
 .field-error {
-  border-color: rgba(240, 128, 128, 0.6) !important;
+  border-color: rgba(232, 101, 79, 0.6) !important;
 }
 .field-error:focus {
-  box-shadow: 0 0 0 3px rgba(240, 128, 128, 0.13) !important;
+  box-shadow: 0 0 0 3px rgba(232, 101, 79, 0.13) !important;
 }
 
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 textarea:-webkit-autofill {
-  -webkit-text-fill-color: var(--color-fg) !important;
-  -webkit-box-shadow: 0 0 0 1000px #1a1510 inset !important;
-  caret-color: var(--color-fg);
+  -webkit-text-fill-color: var(--text-primary) !important;
+  -webkit-box-shadow: 0 0 0 1000px #151a26 inset !important;
+  caret-color: var(--text-primary);
   transition: background-color 5000s ease-in-out 0s;
 }
 
 /* --------------------------------------------------------------------------
-   Buttons
+   Buttons — warm amber primary (trust), ghost glass secondary
    -------------------------------------------------------------------------- */
 .btn-primary {
-  background: #f2ecdf;
-  color: #14100c;
+  background: var(--accent-warm);
+  color: #0a0d14;
   border: 1px solid transparent;
   font-weight: 550;
-  transition: background-color 0.15s ease, transform 0.1s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  transition: background-color 0.15s var(--ease-ledger), transform 0.1s var(--ease-ledger),
+    opacity 0.15s var(--ease-ledger);
+  box-shadow: none;
 }
 .btn-primary:hover:not(:disabled) {
-  background: #fffaf0;
+  background: var(--color-accent-bright);
 }
 .btn-primary:active:not(:disabled) {
   transform: translateY(0.5px);
@@ -204,22 +281,23 @@ textarea:-webkit-autofill {
 }
 
 .btn-ghost {
-  background: rgba(242, 236, 223, 0.03);
-  color: var(--color-fg-muted);
-  border: 1px solid rgba(242, 236, 223, 0.11);
+  background: var(--surface-glass);
+  color: var(--text-muted);
+  border: 1px solid var(--glass-border);
   font-weight: 500;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.15s var(--ease-ledger), color 0.15s var(--ease-ledger),
+    border-color 0.15s var(--ease-ledger);
 }
 .btn-ghost:hover:not(:disabled) {
-  background: rgba(242, 236, 223, 0.06);
-  color: var(--color-fg);
-  border-color: rgba(242, 236, 223, 0.18);
+  background: var(--surface-glass-raised);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .btn-primary:focus-visible,
 .btn-ghost:focus-visible,
 button:focus-visible {
-  outline: 2px solid rgba(255, 122, 92, 0.6);
+  outline: 2px solid rgba(232, 166, 89, 0.7);
   outline-offset: 2px;
 }
 
@@ -227,27 +305,53 @@ button:focus-visible {
    Brand
    -------------------------------------------------------------------------- */
 .brand-mark {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-brand-gold) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 2px 10px rgba(255, 122, 92, 0.28);
+  background: linear-gradient(135deg, var(--accent-warm) 0%, #c4883a 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
-/* Reserved for hero narrative moments */
 .text-gradient-brand {
-  background: linear-gradient(100deg, var(--color-accent-bright) 0%, #ecc57e 100%);
+  background: linear-gradient(100deg, #f0bc7a 0%, var(--accent-warm) 55%, #c4883a 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 
-/* Giant watermark type behind chapter content */
 .watermark {
   font-family: var(--font-display);
   font-style: italic;
   font-variation-settings: 'opsz' 144, 'SOFT' 70, 'WONK' 1;
   color: transparent;
-  -webkit-text-stroke: 1px rgba(242, 236, 223, 0.055);
+  -webkit-text-stroke: 1px rgba(245, 243, 238, 0.055);
   user-select: none;
   pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+   Profile — hero mesh (CSS-only drift; cheap vs JS)
+   -------------------------------------------------------------------------- */
+.profile-banner-mesh {
+  background-color: #10141e;
+  background-image:
+    radial-gradient(ellipse 70% 55% at 18% 42%, rgba(232, 166, 89, 0.2), transparent 58%),
+    radial-gradient(ellipse 65% 50% at 82% 28%, rgba(94, 234, 212, 0.14), transparent 55%),
+    radial-gradient(ellipse 55% 45% at 48% 88%, rgba(232, 166, 89, 0.1), transparent 50%),
+    linear-gradient(160deg, #10141e 0%, #151a26 48%, #0a0d14 100%);
+  background-size: 180% 180%, 180% 180%, 160% 160%, 100% 100%;
+  background-position: 12% 40%, 88% 30%, 50% 90%, 0% 0%;
+  animation: profile-mesh-drift 22s ease-in-out infinite alternate;
+}
+
+@keyframes profile-mesh-drift {
+  0% {
+    background-position: 12% 40%, 88% 30%, 50% 90%, 0% 0%;
+  }
+  100% {
+    background-position: 78% 58%, 18% 68%, 42% 22%, 0% 0%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profile-banner-mesh {
+    animation: none;
+  }
 }
