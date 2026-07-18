@@ -513,6 +513,8 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
   const nopeScale = useTransform(dragX, [-120, 0], [1, 0.8]);
   const superLikeOpacity = useTransform(dragY, [-130, -60, 0], [1, 0, 0]);
   const superLikeScale = useTransform(dragY, [-130, -60], [1, 0.8]);
+  /** Prevents stacked flyOffs while a swipe animation is in flight. */
+  const swipeInFlight = useRef(false);
 
   const getInitials = (name: string) => {
     if (!name) return '??';
@@ -728,6 +730,9 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
   // SWIPE / MATCH
   // ------------------------------------------
   const removeTopCard = useCallback(() => {
+    // Unmount first, then zero drag. Shared dragX/dragY must not reset while an
+    // exiting node still binds them — that snaps the card back to center and
+    // stacks named top-card chrome on the next candidate (ghosting).
     setProfiles((prev) => {
       if (prev.length === 0) return prev;
       const [swiped, ...rest] = prev;
@@ -736,24 +741,41 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
     });
     dragX.set(0);
     dragY.set(0);
+    swipeInFlight.current = false;
   }, [dragX, dragY]);
 
   const flyOff = useCallback(
     async (vx: number, vy: number, dir: 'left' | 'right' | 'up') => {
-      const targetX =
-        dir === 'up' ? dragX.get() + vx * 0.08 : dir === 'right' ? Math.max(480, Math.abs(vx) * 0.35) : -Math.max(480, Math.abs(vx) * 0.35);
-      const targetY = dir === 'up' ? -Math.max(520, Math.abs(vy) * 0.4) : dragY.get() + vy * 0.12;
+      if (swipeInFlight.current) return;
+      swipeInFlight.current = true;
 
-      if (reducedMotion) {
+      try {
+        const targetX =
+          dir === 'up'
+            ? dragX.get() + vx * 0.08
+            : dir === 'right'
+              ? Math.max(480, Math.abs(vx) * 0.35)
+              : -Math.max(480, Math.abs(vx) * 0.35);
+        const targetY =
+          dir === 'up' ? -Math.max(520, Math.abs(vy) * 0.4) : dragY.get() + vy * 0.12;
+
+        if (reducedMotion) {
+          removeTopCard();
+          return;
+        }
+
+        await Promise.all([
+          animate(dragX, targetX, { type: 'tween', duration: 0.28, ease: EASE }),
+          animate(dragY, targetY, { type: 'tween', duration: 0.28, ease: EASE }),
+        ]);
+        // Card is already off-screen via drag transforms — unmount immediately.
+        // Do not keep it in AnimatePresence; exit + shared motion values race.
         removeTopCard();
-        return;
+      } catch {
+        swipeInFlight.current = false;
+        dragX.set(0);
+        dragY.set(0);
       }
-
-      await Promise.all([
-        animate(dragX, targetX, { type: 'tween', duration: 0.28, ease: EASE }),
-        animate(dragY, targetY, { type: 'tween', duration: 0.28, ease: EASE }),
-      ]);
-      removeTopCard();
     },
     [dragX, dragY, reducedMotion, removeTopCard]
   );
@@ -838,11 +860,13 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
   };
 
   const handleRewind = () => {
-    if (history.length === 0) return;
+    if (history.length === 0 || swipeInFlight.current) return;
     const prevHistory = [...history];
     const lastSwiped = prevHistory.pop()!;
     setHistory(prevHistory);
     setProfiles([lastSwiped, ...profiles]);
+    dragX.set(0);
+    dragY.set(0);
   };
 
   const handleDragEnd = (_event: unknown, info: { offset: { x: number; y: number }; velocity: { x: number; y: number } }) => {
@@ -1159,24 +1183,22 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                       </button>
                     </div>
                   ) : (
-                    <AnimatePresence mode="popLayout">
-                      {profiles.slice(0, 3).map((profile, index) => {
+                    {/*
+                      No AnimatePresence here: flyOff already moves the top card
+                      off-screen via shared dragX/dragY, then we splice it from
+                      `profiles`. Keeping exited nodes mounted (popLayout + layout)
+                      caused named top-card chrome to accumulate and overlap.
+                      Cap is always profiles.slice(0, 3) — at most 3 DOM cards.
+                    */}
+                    {profiles.slice(0, 3).map((profile, index) => {
                         const isTop = index === 0;
                         return (
                           <motion.div
                             key={profile.id}
-                            layout
+                            data-deck-card={profile.id}
+                            data-deck-index={index}
                             initial={false}
-                            animate={
-                              isTop
-                                ? { scale: 1 }
-                                : stackAnimate(index, reducedMotion)
-                            }
-                            exit={
-                              reducedMotion
-                                ? { opacity: 0 }
-                                : { opacity: 0, scale: 0.92, transition: { duration: 0.2 } }
-                            }
+                            animate={stackAnimate(index, reducedMotion)}
                             transition={SPRING_STACK}
                             drag={isTop && !reducedMotion}
                             dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
@@ -1188,6 +1210,7 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                                     x: dragX,
                                     y: dragY,
                                     rotate: reducedMotion ? 0 : rotate,
+                                    // Drag opacity wins over animate.opacity while top.
                                     opacity: cardOpacity,
                                     zIndex: 3,
                                     pointerEvents: 'auto',
@@ -1291,7 +1314,6 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                           </motion.div>
                         );
                       })}
-                    </AnimatePresence>
                   )}
                 </div>
 
