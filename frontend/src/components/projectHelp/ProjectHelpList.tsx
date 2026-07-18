@@ -1,28 +1,32 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
 import { ArrowUpDown, Code2, Plus, Search } from 'lucide-react';
 import type { RequestStatus } from '../RequestStepper';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
 import {
-  deriveInterested,
-  deriveUrgency,
-  EASE,
-  SPRING_PILL,
-  URGENCY_RANK,
-} from './helpers';
+  computeVirtualWindow,
+  VIRTUALIZE_THRESHOLD,
+} from '../../lib/virtualList';
+import { deriveUrgency, EASE, SPRING_PILL, URGENCY_RANK } from './helpers';
 import type { ListTab, ProjectRequest, SortMode, Urgency } from './types';
-import { nextRequestStatus, RequestCard } from './RequestCard';
+import { RequestCard } from './RequestCard';
+
+/** Card + gap estimate for fixed-row windowing. */
+const REQUEST_ROW_HEIGHT = 200;
 
 type ProjectHelpListProps = {
   projects: ProjectRequest[];
   loading: boolean;
+  error?: string | null;
+  onRetry?: () => void;
   myUserId: number | null;
   helpingIds: Set<number>;
   projectStatuses: Record<number, RequestStatus>;
   urgencyOverrides: Record<number, Urgency>;
+  /** Known interest counts from loaded details (optional). */
+  interestCounts?: Record<number, number>;
   onOpenDetail: (id: number) => void;
   onNewRequest: () => void;
-  onStatusChange: (id: number, next: RequestStatus) => void;
 };
 
 const TABS: { key: ListTab; label: string }[] = [
@@ -59,13 +63,15 @@ const RequestSkeleton: React.FC = () => (
 export const ProjectHelpList: React.FC<ProjectHelpListProps> = ({
   projects,
   loading,
+  error = null,
+  onRetry,
   myUserId,
   helpingIds,
   projectStatuses,
   urgencyOverrides,
+  interestCounts = {},
   onOpenDetail,
   onNewRequest,
-  onStatusChange,
 }) => {
   const reduced = usePrefersReducedMotion();
   const [tab, setTab] = useState<ListTab>('all');
@@ -74,6 +80,9 @@ export const ProjectHelpList: React.FC<ProjectHelpListProps> = ({
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   /** Bumps on tab switch so cards re-stagger. */
   const [enterKey, setEnterKey] = useState(0);
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const [listScrollTop, setListScrollTop] = useState(0);
+  const [listViewportH, setListViewportH] = useState(560);
 
   const allTags = useMemo(() => {
     const set = new Set<string>();
@@ -83,6 +92,11 @@ export const ProjectHelpList: React.FC<ProjectHelpListProps> = ({
 
   const filtered = useMemo(() => {
     let list = [...projects];
+
+    // Cancelled requests stay visible only under "My requests".
+    if (tab !== 'mine') {
+      list = list.filter((p) => p.status !== 'cancelled');
+    }
 
     if (tab === 'mine' && myUserId != null) {
       list = list.filter((p) => p.user_id === myUserId);
@@ -120,6 +134,39 @@ export const ProjectHelpList: React.FC<ProjectHelpListProps> = ({
 
     return list;
   }, [projects, tab, myUserId, helpingIds, query, sort, tagFilter, urgencyOverrides]);
+
+  const virtualize = filtered.length >= VIRTUALIZE_THRESHOLD;
+  const listWindow = virtualize
+    ? computeVirtualWindow(
+        filtered.length,
+        listScrollTop,
+        listViewportH,
+        REQUEST_ROW_HEIGHT
+      )
+    : {
+        start: 0,
+        end: filtered.length,
+        offsetTop: 0,
+        totalHeight: filtered.length * REQUEST_ROW_HEIGHT,
+      };
+  const visibleProjects = filtered.slice(listWindow.start, listWindow.end);
+
+  useEffect(() => {
+    if (!virtualize) return;
+    const el = listScrollRef.current;
+    if (!el) return;
+    const sync = () => setListViewportH(el.clientHeight);
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [virtualize, filtered.length]);
+
+  // Reset window when filters/tab change so we don't leave a blank slice.
+  useEffect(() => {
+    setListScrollTop(0);
+    if (listScrollRef.current) listScrollRef.current.scrollTop = 0;
+  }, [tab, query, sort, tagFilter, enterKey]);
 
   return (
     <div className="w-full max-w-2xl mx-auto">
@@ -235,40 +282,86 @@ export const ProjectHelpList: React.FC<ProjectHelpListProps> = ({
 
       {loading ? (
         <RequestSkeleton />
+      ) : error ? (
+        <div className="glass rounded-[18px] p-12 text-center" role="alert">
+          <p className="text-sm text-fg-muted">{error}</p>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="btn-ghost mt-4 px-4 py-2 rounded-[12px] text-[13px]"
+            >
+              Try again
+            </button>
+          )}
+        </div>
       ) : filtered.length > 0 ? (
-        <div className="space-y-3">
-          <AnimatePresence mode="popLayout">
-            {filtered.map((proj, index) => (
-              <motion.div
-                key={`${enterKey}-${proj.id}`}
-                layout
-                initial={reduced ? false : { opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={reduced ? { opacity: 0 } : { opacity: 0, y: -6 }}
-                transition={{
-                  duration: reduced ? 0 : 0.32,
-                  delay: reduced ? 0 : index * 0.04,
-                  ease: EASE,
-                }}
-              >
-                <RequestCard
-                  project={proj}
-                  status={projectStatuses[proj.id] || 'pending'}
-                  urgency={deriveUrgency(proj, urgencyOverrides[proj.id])}
-                  interestOverride={
-                    helpingIds.has(proj.id)
-                      ? Math.max(deriveInterested(proj.id).length, 1)
-                      : undefined
-                  }
-                  onClick={() => onOpenDetail(proj.id)}
-                  onCycleStatus={() => {
-                    const cur = projectStatuses[proj.id] || 'pending';
-                    onStatusChange(proj.id, nextRequestStatus(cur));
-                  }}
-                />
-              </motion.div>
-            ))}
-          </AnimatePresence>
+        <div
+          ref={listScrollRef}
+          className={
+            virtualize
+              ? 'overflow-y-auto max-h-[min(70vh,720px)] pr-0.5'
+              : undefined
+          }
+          onScroll={
+            virtualize
+              ? (e) => setListScrollTop(e.currentTarget.scrollTop)
+              : undefined
+          }
+          role="list"
+          aria-label={`${filtered.length} project help requests`}
+        >
+          <div
+            className={virtualize ? 'relative' : 'space-y-3'}
+            style={virtualize ? { height: listWindow.totalHeight } : undefined}
+          >
+            <div
+              className={virtualize ? 'absolute left-0 right-0 space-y-3' : undefined}
+              style={virtualize ? { top: listWindow.offsetTop } : undefined}
+            >
+              <AnimatePresence {...(virtualize ? {} : { mode: 'popLayout' as const })}>
+                {visibleProjects.map((proj, visibleIdx) => {
+                  const index = listWindow.start + visibleIdx;
+                  return (
+                    <motion.div
+                      key={`${enterKey}-${proj.id}`}
+                      layout={!virtualize}
+                      role="listitem"
+                      initial={reduced || virtualize ? false : { opacity: 0, y: 14 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={
+                        reduced || virtualize
+                          ? { opacity: 0 }
+                          : { opacity: 0, y: -6 }
+                      }
+                      transition={{
+                        duration: reduced || virtualize ? 0 : 0.32,
+                        delay: reduced || virtualize ? 0 : index * 0.04,
+                        ease: EASE,
+                      }}
+                      className={virtualize ? 'overflow-hidden' : undefined}
+                      style={
+                        virtualize
+                          ? { height: REQUEST_ROW_HEIGHT - 12, marginBottom: 12 }
+                          : undefined
+                      }
+                    >
+                      <RequestCard
+                        project={proj}
+                        status={projectStatuses[proj.id] || 'pending'}
+                        urgency={deriveUrgency(proj, urgencyOverrides[proj.id])}
+                        interestOverride={
+                          interestCounts[proj.id] ??
+                          (helpingIds.has(proj.id) ? 1 : 0)
+                        }
+                        onClick={() => onOpenDetail(proj.id)}
+                      />
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </div>
+          </div>
         </div>
       ) : (
         <div className="glass rounded-[18px] p-12 text-center flex flex-col items-center">

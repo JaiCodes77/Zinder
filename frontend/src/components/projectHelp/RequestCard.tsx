@@ -34,9 +34,15 @@ export const RequestCard: React.FC<RequestCardProps> = ({
 }) => {
   const category = inferCategory(project.title, project.tech_stack || []);
   const colors = CATEGORY_COLORS[category];
-  const interested = deriveInterested(project.id);
+  const interested = interestOverride == null ? deriveInterested(project.id) : [];
   const interestCount = interestOverride ?? interested.length;
-  const shown = interested.slice(0, 3);
+  const shown =
+    interestOverride != null
+      ? Array.from({ length: Math.min(interestCount, 3) }, (_, i) => ({
+          initials: '·',
+          name: `Interested ${i + 1}`,
+        }))
+      : interested.slice(0, 3);
 
   return (
     <motion.div

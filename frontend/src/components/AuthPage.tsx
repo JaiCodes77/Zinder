@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, EyeOff, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { GatewayNetwork } from './GatewayNetwork';
+import { login, register } from '../api/auth';
+import { ApiError } from '../api/client';
+import { authStubMessage } from '../lib/authStubs';
 
 // ==========================================
 // VALIDATION HELPERS
@@ -58,7 +61,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
   const [isLogin, setIsLogin] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [toastMessage, setToastMessage] = useState<{
+    text: string;
+    type: 'success' | 'error' | 'info';
+  } | null>(null);
 
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -133,37 +139,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
     setToastMessage(null);
 
     try {
-      const url = isLogin
-        ? 'http://localhost:8080/api/v1/auth/login'
-        : 'http://localhost:8080/api/v1/auth/register';
-
-      const body = isLogin ? { email, password } : { email, password, name };
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        credentials: 'include',
-      });
-
-      if (!response.ok) {
-        let errorDetail = 'Something went wrong. Please try again.';
-        try {
-          const data = await response.json();
-          if (data && data.detail) errorDetail = data.detail;
-          else if (data && data.message) errorDetail = data.message;
-        } catch {
-          // ignore parse failure, keep generic message
-        }
-        throw new Error(errorDetail);
-      }
-
       if (isLogin) {
+        await login(email, password);
         setToastMessage({ text: 'Signed in. Your story continues…', type: 'success' });
         setTimeout(() => {
           onLoginSuccess();
         }, 900);
       } else {
+        await register(email, password, name);
         setToastMessage({ text: 'Account created — sign in to begin.', type: 'success' });
         setTimeout(() => {
           setIsLogin(true);
@@ -172,8 +155,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
           setPasswordTouched(false);
         }, 1800);
       }
-    } catch (error: any) {
-      setToastMessage({ text: error.message || 'Something went wrong. Please try again.', type: 'error' });
+    } catch (error: unknown) {
+      const message =
+        error instanceof ApiError
+          ? error.detail
+          : error instanceof Error
+            ? error.message
+            : 'Something went wrong. Please try again.';
+      setToastMessage({ text: message, type: 'error' });
     } finally {
       setIsLoading(false);
     }
@@ -300,7 +289,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                 className={`px-3.5 py-3 rounded-lg flex items-start gap-2.5 mb-5 text-[13px] leading-snug border ${
                   toastMessage.type === 'success'
                     ? 'bg-accent-brand/10 border-accent-brand/25 text-accent-brand'
-                    : 'bg-pass/8 border-pass/20 text-pass'
+                    : toastMessage.type === 'info'
+                      ? 'bg-white/[0.04] border-white/12 text-fg-muted'
+                      : 'bg-pass/8 border-pass/20 text-pass'
                 }`}
               >
                 {toastMessage.type === 'success' ? (
@@ -374,9 +365,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                       <button
                         type="button"
                         onClick={() =>
-                          setToastMessage({ text: 'Password reset isn’t available in this preview.', type: 'error' })
+                          setToastMessage({
+                            text: authStubMessage('password_reset'),
+                            type: 'info',
+                          })
                         }
-                        className="text-xs font-medium text-fg-subtle hover:text-accent transition-colors"
+                        className="text-xs font-medium text-fg-subtle hover:text-fg-muted transition-colors"
+                        aria-label="Forgot password (not available yet)"
                       >
                         Forgot password?
                       </button>
@@ -436,38 +431,44 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
             <div className="flex-1 h-px bg-fg/8" />
           </div>
 
-          {/* SSO */}
+          {/* SSO stubs — no BE OAuth yet; honest “coming soon” instead of fake errors */}
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
               onClick={() =>
-                setToastMessage({ text: 'Single sign-on isn’t available in this preview.', type: 'error' })
+                setToastMessage({ text: authStubMessage('sso'), type: 'info' })
               }
-              className="btn-ghost flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-[13px]"
+              aria-label="Continue with Apple (coming soon)"
+              title="Coming soon"
+              className="btn-ghost flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-[13px] text-fg-muted"
             >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden>
+              <svg className="w-4 h-4 opacity-70" viewBox="0 0 24 24" aria-hidden>
                 <path
                   fill="currentColor"
                   d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.54 9.103 1.51 12.06 1.005 1.45 2.176 3.078 3.75 3.014 1.52-.062 2.09-.98 3.93-.98 1.83 0 2.365.98 3.96.948 1.627-.027 2.66-1.478 3.655-2.92 1.157-1.688 1.63-3.325 1.66-3.418-.03-.01-3.178-1.22-3.21-4.816-.026-3.003 2.46-4.444 2.574-4.515-1.41-2.063-3.582-2.29-4.35-2.35-2.072-.167-3.308.766-4.158.766zM15.93 3.559c.813-1.002 1.35-2.387 1.2-3.774-1.19.048-2.63.792-3.483 1.79-.766.88-1.436 2.293-1.258 3.653 1.325.1 2.695-.694 3.54-1.67z"
                 />
               </svg>
               <span>Apple</span>
+              <span className="mono-label !text-[9px] !normal-case opacity-80">soon</span>
             </button>
 
             <button
               type="button"
               onClick={() =>
-                setToastMessage({ text: 'Single sign-on isn’t available in this preview.', type: 'error' })
+                setToastMessage({ text: authStubMessage('sso'), type: 'info' })
               }
-              className="btn-ghost flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-[13px]"
+              aria-label="Continue with Google (coming soon)"
+              title="Coming soon"
+              className="btn-ghost flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-[13px] text-fg-muted"
             >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden>
+              <svg className="w-4 h-4 opacity-70" viewBox="0 0 24 24" aria-hidden>
                 <path
                   fill="currentColor"
                   d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.51 0-6.355-2.845-6.355-6.355s2.845-6.355 6.355-6.355c1.61 0 3.076.61 4.205 1.61l3.123-3.123C19.11 1.79 15.89 0 12.24 0 5.48 0 0 5.48 0 12.24s5.48 12.24 12.24 12.24c6.88 0 12.24-5.48 12.24-12.24 0-.82-.08-1.61-.24-2.385H12.24z"
                 />
               </svg>
               <span>Google</span>
+              <span className="mono-label !text-[9px] !normal-case opacity-80">soon</span>
             </button>
           </div>
 

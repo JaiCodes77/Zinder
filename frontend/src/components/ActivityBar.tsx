@@ -20,7 +20,7 @@ type ActivityBarProps = {
   userName?: string;
   userEmail?: string;
   userInitials: string;
-  onLogout: () => void;
+  onLogout: () => void | Promise<void>;
   Avatar: React.FC<{ initials: string; size?: string; className?: string }>;
 };
 
@@ -89,7 +89,7 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
               type="button"
               onClick={() => onNavigate(key)}
               aria-current={active ? 'page' : undefined}
-              aria-label={label}
+              aria-label={showBadge ? `${label}, ${matchCount} conversations` : label}
               className={`activity-bar__item ${active ? 'is-active' : ''} ${
                 collapsed ? 'is-collapsed' : ''
               }`}
@@ -101,9 +101,10 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
                   strokeWidth={active ? 2.25 : 1.75}
                   fill={active ? 'currentColor' : 'none'}
                   fillOpacity={active ? 0.18 : 0}
+                  aria-hidden
                 />
                 {showBadge && collapsed && (
-                  <span className="activity-bar__badge-dot" aria-label={`${matchCount} matches`}>
+                  <span className="activity-bar__badge-dot" aria-hidden>
                     {matchCount > 9 ? '9+' : matchCount}
                   </span>
                 )}
@@ -111,7 +112,11 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
               {!collapsed && (
                 <>
                   <span className="activity-bar__label truncate flex-1 text-left">{label}</span>
-                  {showBadge && <span className="nav-count-chip flex-shrink-0">{matchCount}</span>}
+                  {showBadge && (
+                    <span className="nav-count-chip flex-shrink-0" aria-hidden>
+                      {matchCount}
+                    </span>
+                  )}
                 </>
               )}
               {collapsed && (

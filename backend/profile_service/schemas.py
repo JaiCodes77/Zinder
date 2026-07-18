@@ -80,6 +80,13 @@ class ProjectCreate(BaseModel):
     tech_stack: List[str] = Field(default_factory=list)
 
 
+class ProjectUpdate(BaseModel):
+    """Owner edit — only while the request is still pending."""
+    title: Optional[str] = Field(None, min_length=3, max_length=100)
+    description: Optional[str] = Field(None, min_length=10)
+    tech_stack: Optional[List[str]] = None
+
+
 class ProjectResponse(BaseModel):
     id: int
     user_id: int

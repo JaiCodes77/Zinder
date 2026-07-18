@@ -365,6 +365,50 @@ def list_projects() -> List[Dict[str, Any]]:
     return projects
 
 
+def update_project_fields(
+    project_id: int,
+    actor_user_id: int,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    tech_stack: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Owner-only edit of title/description/tech while status is pending."""
+    project = get_project_row(project_id)
+    if not project:
+        raise ValueError("Project not found.")
+    if actor_user_id != project["user_id"]:
+        raise ValueError("Only the project owner can edit.")
+    if (project.get("status") or "pending") != "pending":
+        raise ValueError("Only pending projects can be edited.")
+    if title is None and description is None and tech_stack is None:
+        raise ValueError("No fields to update.")
+
+    next_title = title.strip() if title is not None else project["title"]
+    next_desc = description.strip() if description is not None else project["description"]
+    next_tech = tech_stack if tech_stack is not None else project.get("tech_stack") or []
+    if not next_title or len(next_title) < 3:
+        raise ValueError("Title needs at least 3 characters.")
+    if not next_desc or len(next_desc) < 10:
+        raise ValueError("Description needs at least 10 characters.")
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE projects
+            SET title = ?, description = ?, tech_stack = ?
+            WHERE id = ?
+            """,
+            (next_title, next_desc, json.dumps(list(next_tech)), project_id),
+        )
+        conn.commit()
+
+    updated = get_project_row(project_id)
+    if not updated:
+        raise ValueError("Project not found after update.")
+    return updated
+
+
 def update_project_status(
     project_id: int,
     new_status: str,

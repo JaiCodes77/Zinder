@@ -105,6 +105,12 @@ class ProjectCreate(BaseModel):
     tech_stack: List[str] = Field(..., description="List of technologies used")
 
 
+class ProjectUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=3, max_length=100)
+    description: Optional[str] = Field(None, min_length=10)
+    tech_stack: Optional[List[str]] = None
+
+
 class ProjectStatusUpdate(BaseModel):
     status: str
     helper_user_id: Optional[int] = None
@@ -364,6 +370,21 @@ async def get_my_profile(session: Dict[str, Any] = Depends(validate_session)) ->
     )
 
 
+@app.get("/api/v1/profiles/{target_user_id}", status_code=status.HTTP_200_OK)
+async def get_public_profile(
+    target_user_id: int,
+    session: Dict[str, Any] = Depends(validate_session),
+) -> Dict[str, Any]:
+    """Public profile for another user (email redacted server-side when not self)."""
+    user_id = _session_user_id(session)
+    return await _proxy_json(
+        "GET",
+        f"{PROFILE_SERVICE_URL}/api/v1/profiles/{target_user_id}",
+        user_id=user_id,
+        expected={200},
+    )
+
+
 @app.post("/api/v1/profiles", status_code=status.HTTP_200_OK)
 async def update_profile(
     profile_data: ProfileUpdate,
@@ -417,6 +438,23 @@ async def get_project(
     return await _proxy_json(
         "GET",
         f"{PROFILE_SERVICE_URL}/api/v1/projects/{project_id}",
+        expected={200},
+    )
+
+
+@app.patch("/api/v1/projects/{project_id}", status_code=status.HTTP_200_OK)
+async def patch_project(
+    project_id: int,
+    body: ProjectUpdate,
+    session: Dict[str, Any] = Depends(validate_session),
+) -> Any:
+    """Owner edit of title / description / tech_stack (pending only)."""
+    user_id = _session_user_id(session)
+    return await _proxy_json(
+        "PATCH",
+        f"{PROFILE_SERVICE_URL}/api/v1/projects/{project_id}",
+        user_id=user_id,
+        json_body=body.model_dump(exclude_none=True),
         expected={200},
     )
 

@@ -1,9 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Loader2, Send } from 'lucide-react';
 import type { ThreadComment } from './types';
 import { formatWhen, parseCommentBody } from './helpers';
 
 type CommentThreadProps = {
   comments: ThreadComment[];
+  onPost?: (body: string) => Promise<void> | void;
+  posting?: boolean;
+  error?: string | null;
 };
 
 const CommentBody: React.FC<{ body: string }> = ({ body }) => {
@@ -31,11 +35,31 @@ const CommentBody: React.FC<{ body: string }> = ({ body }) => {
 };
 
 /** Lightweight GitHub-issue style discussion. */
-export const CommentThread: React.FC<CommentThreadProps> = ({ comments }) => {
+export const CommentThread: React.FC<CommentThreadProps> = ({
+  comments,
+  onPost,
+  posting = false,
+  error = null,
+}) => {
+  const [draft, setDraft] = useState('');
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const body = draft.trim();
+    if (!body || !onPost || posting) return;
+    await onPost(body);
+    setDraft('');
+  };
+
   return (
     <div className="space-y-0">
       <p className="kicker mb-3">Discussion</p>
       <ul className="space-y-3">
+        {comments.length === 0 && (
+          <li className="glass rounded-[14px] p-4 text-[13px] text-fg-subtle">
+            No comments yet. Start the thread.
+          </li>
+        )}
         {comments.map((c) => (
           <li key={c.id} className="glass rounded-[14px] p-4">
             <div className="flex items-center gap-2.5 mb-2.5">
@@ -56,6 +80,30 @@ export const CommentThread: React.FC<CommentThreadProps> = ({ comments }) => {
           </li>
         ))}
       </ul>
+
+      {onPost && (
+        <form onSubmit={submit} className="mt-4 glass rounded-[14px] p-3">
+          {error && <p className="text-[12px] text-pass mb-2">{error}</p>}
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={3}
+            placeholder="Leave a comment…"
+            disabled={posting}
+            className="field w-full px-3 py-2 text-[13px] text-fg placeholder-fg-subtle resize-y min-h-[72px] focus:outline-none"
+          />
+          <div className="flex justify-end mt-2">
+            <button
+              type="submit"
+              disabled={posting || !draft.trim()}
+              className="btn-primary flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-[12px] disabled:opacity-50"
+            >
+              {posting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              Comment
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 };

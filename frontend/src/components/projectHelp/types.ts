@@ -1,6 +1,6 @@
 import type { RequestStatus } from '../RequestStepper';
 
-/** API shape from GET/POST /api/v1/projects — unchanged. */
+/** API shape from GET/POST /api/v1/projects. */
 export type ProjectRequest = {
   id: number;
   user_id: number;
@@ -9,6 +9,15 @@ export type ProjectRequest = {
   description: string;
   tech_stack: string[];
   timestamp: string;
+  status?: string;
+  helper_user_id?: number | null;
+};
+
+export type InterestedPerson = {
+  userId: number;
+  name: string;
+  initials: string;
+  note?: string | null;
 };
 
 export type ProjectHelpView = 'list' | 'detail' | 'new';

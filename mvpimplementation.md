@@ -66,6 +66,7 @@ Auth: cookie `sessionId`. Protected routes require a valid session.
 | Method | Path | Response |
 |--------|------|----------|
 | GET | `/profiles/me` | Full profile incl. `lat`, `lng`, `last_active_at` |
+| GET | `/profiles/{user_id}` | Profile for another user (email redacted when not self) |
 | POST | `/profiles` | Create/update (same fields; optional `lat`/`lng`) |
 
 ### Discover / Matcher
@@ -92,6 +93,7 @@ Auth: cookie `sessionId`. Protected routes require a valid session.
 | GET | `/projects` | — | `Project[]` (includes `status`, `helper_user_id`) |
 | POST | `/projects` | `{ title, description, tech_stack[] }` | `Project` |
 | GET | `/projects/{id}` | — | `Project` + `interested[]` + `comments[]` |
+| PATCH | `/projects/{id}` | `{ title?, description?, tech_stack? }` | `Project` (owner, pending only) |
 | PATCH | `/projects/{id}/status` | `{ status, helper_user_id? }` | `Project` |
 | POST | `/projects/{id}/interested` | `{ note? }` | interest row |
 | DELETE | `/projects/{id}/interested` | — | `204` |

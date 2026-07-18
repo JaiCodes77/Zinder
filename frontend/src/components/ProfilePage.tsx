@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { apiFetch, ApiError } from '../api/client';
 import {
   motion,
   AnimatePresence,
@@ -26,6 +27,7 @@ import { FloatingField } from './FloatingField';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 import type { RequestStatus } from './RequestStepper';
 import { languageTone } from '../lib/languageColors';
+import { compressAvatarFile } from '../lib/avatarImage';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 const EASE_OUT = [0.16, 1, 0.3, 1] as const;
@@ -208,7 +210,7 @@ export interface ProfilePageProps {
   matches: ProfileMatch[];
   projects: any[];
   projectStatuses: Record<number, RequestStatus>;
-  onLogout: () => void;
+  onLogout: () => void | Promise<void>;
   onRetry: () => void;
   onSaved: () => Promise<void> | void;
   getInitials: (name: string) => string;
@@ -238,6 +240,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   const [saving, setSaving] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [avatarDragging, setAvatarDragging] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const matchCount = matches.filter((m) => m.type !== 'project').length;
@@ -320,14 +323,20 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
     }
   };
 
-  const applyAvatarFile = (file: File) => {
-    if (!file.type.startsWith('image/')) return;
+  const applyAvatarFile = async (file: File) => {
     if (!isEditing) startEditing();
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') setEditImage(reader.result);
-    };
-    reader.readAsDataURL(file);
+    setAvatarBusy(true);
+    setProfileError(null);
+    try {
+      const dataUrl = await compressAvatarFile(file);
+      setEditImage(dataUrl);
+    } catch (err) {
+      setProfileError(
+        err instanceof Error ? err.message : 'Could not process that image.'
+      );
+    } finally {
+      setAvatarBusy(false);
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -336,10 +345,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
     setSaving(true);
     setProfileError(null);
     try {
-      const res = await fetch('http://localhost:8080/api/v1/profiles', {
+      await apiFetch('/profiles', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        json: {
           age: editAge,
           looking_for: editLookingFor,
           radius_limit: editRadiusLimit,
@@ -347,19 +355,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
           interests: editInterests,
           distance: myProfile?.distance || '3 miles away',
           ...(editImage ? { image: editImage } : {}),
-        }),
-        credentials: 'include',
+        },
       });
-      if (res.ok) {
-        await onSaved();
-        setIsEditing(false);
-        setEditImage(null);
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        setProfileError(errData.detail || 'Could not save your profile.');
-      }
-    } catch {
-      setProfileError('Network error — could not save your profile.');
+      await onSaved();
+      setIsEditing(false);
+      setEditImage(null);
+    } catch (err) {
+      setProfileError(
+        err instanceof ApiError
+          ? err.detail
+          : 'Network error — could not save your profile.'
+      );
     } finally {
       setSaving(false);
     }
@@ -443,7 +449,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                 e.preventDefault();
                 setAvatarDragging(false);
                 const file = e.dataTransfer.files?.[0];
-                if (file) applyAvatarFile(file);
+                if (file) void applyAvatarFile(file);
               }}
             >
               <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full p-[3px] bg-gradient-to-br from-accent-brand to-accent-deep">
@@ -451,7 +457,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                   {avatarSrc ? (
                     <img
                       src={avatarSrc}
-                      alt=""
+                      alt={`${myProfile.user.name}'s avatar`}
                       className="w-full h-full object-cover"
                     />
                   ) : (
@@ -463,23 +469,29 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
               </div>
               <button
                 type="button"
+                disabled={avatarBusy}
                 onClick={() => {
                   if (!isEditing) startEditing();
                   fileInputRef.current?.click();
                 }}
-                aria-label="Upload avatar"
-                className="absolute inset-0 rounded-full flex items-center justify-center bg-bg-base/55 opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-pointer"
+                aria-label={avatarBusy ? 'Processing avatar' : 'Upload avatar'}
+                aria-busy={avatarBusy}
+                className="absolute inset-0 rounded-full flex items-center justify-center bg-bg-base/55 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-200 cursor-pointer disabled:cursor-wait"
               >
-                <Camera className="w-6 h-6 text-fg" />
+                {avatarBusy ? (
+                  <Loader2 className="w-6 h-6 text-fg animate-spin" />
+                ) : (
+                  <Camera className="w-6 h-6 text-fg" />
+                )}
               </button>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/jpeg,image/png,image/webp,image/gif"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) applyAvatarFile(file);
+                  if (file) void applyAvatarFile(file);
                   e.target.value = '';
                 }}
               />

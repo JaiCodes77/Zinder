@@ -3,7 +3,10 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   Code2,
   Compass,
+  Layers,
+  LayoutGrid,
   MessageCircle,
+  Plus,
   Search,
   User,
   type LucideIcon,
@@ -26,6 +29,10 @@ type CommandPaletteProps = {
   onNavigateTab: (tab: ActivityTab) => void;
   onOpenMatch: (match: PaletteMatch) => void;
   onOpenProject: (project: PaletteProject) => void;
+  /** Jump straight to Discover deck / browse (optional actions). */
+  onOpenDiscoverDeck?: () => void;
+  onOpenDiscoverBrowse?: () => void;
+  onNewProjectHelp?: () => void;
   matches: PaletteMatch[];
   projects: PaletteProject[];
   reducedMotion?: boolean;
@@ -33,7 +40,7 @@ type CommandPaletteProps = {
 
 type PaletteItem = {
   id: string;
-  group: 'Navigate' | 'Matches' | 'Project help';
+  group: 'Navigate' | 'Actions' | 'Matches' | 'Project help';
   label: string;
   hint?: string;
   icon: LucideIcon;
@@ -41,7 +48,8 @@ type PaletteItem = {
   run: () => void;
 };
 
-function fuzzyScore(query: string, text: string): number {
+/** Exported for unit tests. */
+export function fuzzyScore(query: string, text: string): number {
   const q = query.trim().toLowerCase();
   const t = text.toLowerCase();
   if (!q) return 1;
@@ -85,6 +93,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onNavigateTab,
   onOpenMatch,
   onOpenProject,
+  onOpenDiscoverDeck,
+  onOpenDiscoverBrowse,
+  onNewProjectHelp,
   matches,
   projects,
   reducedMotion = false,
@@ -111,6 +122,58 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           icon: nav.icon,
           score: q ? score + 20 : score,
           run: () => onNavigateTab(nav.tab),
+        });
+      }
+    }
+
+    const actions: {
+      id: string;
+      label: string;
+      keywords: string;
+      hint: string;
+      icon: LucideIcon;
+      run?: () => void;
+    }[] = [
+      {
+        id: 'action-deck',
+        label: 'Open Discover deck',
+        keywords: 'deck swipe cards stack',
+        hint: 'Discover',
+        icon: Layers,
+        run: onOpenDiscoverDeck,
+      },
+      {
+        id: 'action-browse',
+        label: 'Open Discover browse',
+        keywords: 'browse grid list candidates',
+        hint: 'Discover',
+        icon: LayoutGrid,
+        run: onOpenDiscoverBrowse,
+      },
+      {
+        id: 'action-new-ph',
+        label: 'New Project Help request',
+        keywords: 'new create project help request issue',
+        hint: 'Create',
+        icon: Plus,
+        run: onNewProjectHelp,
+      },
+    ];
+
+    for (const action of actions) {
+      if (!action.run) continue;
+      const score = q
+        ? Math.max(fuzzyScore(q, action.label), fuzzyScore(q, action.keywords))
+        : 40;
+      if (!q || score > 0) {
+        results.push({
+          id: action.id,
+          group: 'Actions',
+          label: action.label,
+          hint: action.hint,
+          icon: action.icon,
+          score: q ? score + 15 : score,
+          run: action.run,
         });
       }
     }
@@ -146,14 +209,27 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     }
 
     results.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
-    // Without a query, keep nav first then a short slice of entities
+    // Without a query: Navigate → Actions → short entity slice
     if (!q) {
       const nav = results.filter((r) => r.group === 'Navigate');
-      const rest = results.filter((r) => r.group !== 'Navigate').slice(0, 8);
-      return [...nav, ...rest];
+      const acts = results.filter((r) => r.group === 'Actions');
+      const rest = results
+        .filter((r) => r.group !== 'Navigate' && r.group !== 'Actions')
+        .slice(0, 6);
+      return [...nav, ...acts, ...rest];
     }
     return results.slice(0, 12);
-  }, [query, matches, projects, onNavigateTab, onOpenMatch, onOpenProject]);
+  }, [
+    query,
+    matches,
+    projects,
+    onNavigateTab,
+    onOpenMatch,
+    onOpenProject,
+    onOpenDiscoverDeck,
+    onOpenDiscoverBrowse,
+    onNewProjectHelp,
+  ]);
 
   useEffect(() => {
     if (!open) return;

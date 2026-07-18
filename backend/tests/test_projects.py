@@ -60,13 +60,14 @@ def test_status_forward_transitions(profile_client):
         headers=auth_headers(2),
     )
 
-    # Non-owner cannot accept
+    # Non-owner cannot accept (authZ → 403)
     denied = profile_client.patch(
         f"/api/v1/projects/{pid}/status",
         json={"status": "accepted", "helper_user_id": 2},
         headers=auth_headers(2),
     )
-    assert denied.status_code == 400
+    assert denied.status_code == 403
+    assert "owner" in denied.json()["detail"].lower()
 
     accepted = profile_client.patch(
         f"/api/v1/projects/{pid}/status",
@@ -126,20 +127,20 @@ def test_reject_invalid_and_backward_transitions(profile_client):
     )
     assert back.status_code == 400
 
-    # Stranger cannot change status
+    # Stranger cannot change status (authZ → 403)
     stranger = profile_client.patch(
         f"/api/v1/projects/{pid}/status",
         json={"status": "in_progress"},
         headers=auth_headers(99),
     )
-    assert stranger.status_code == 400
+    assert stranger.status_code == 403
 
 
 def test_owner_cancel_allowed(profile_client):
     project = _create_project(profile_client, user_id=1)
     pid = project["id"]
 
-    # Helper cannot cancel
+    # Helper cannot cancel (authZ → 403)
     profile_client.post(
         f"/api/v1/projects/{pid}/interested",
         json={},
@@ -155,7 +156,7 @@ def test_owner_cancel_allowed(profile_client):
         json={"status": "cancelled"},
         headers=auth_headers(2),
     )
-    assert helper_cancel.status_code == 400
+    assert helper_cancel.status_code == 403
 
     owner_cancel = profile_client.patch(
         f"/api/v1/projects/{pid}/status",

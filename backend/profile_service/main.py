@@ -21,6 +21,7 @@ from profile_service.database import (
     touch_last_active,
     list_projects,
     get_project_row,
+    update_project_fields,
     update_project_status,
     add_interested,
     remove_interested,
@@ -36,6 +37,7 @@ from profile_service.schemas import (
     ProfileResponse,
     PublicProfileResponse,
     ProjectCreate,
+    ProjectUpdate,
     ProjectResponse,
     ProjectDetailResponse,
     ProjectStatusUpdate,
@@ -44,6 +46,16 @@ from profile_service.schemas import (
     CommentCreate,
     CommentResponse,
 )
+
+
+def _project_error_status(msg: str) -> int:
+    """Map domain ValueErrors to HTTP codes — authZ → 403."""
+    lower = msg.lower()
+    if "not found" in lower:
+        return status.HTTP_404_NOT_FOUND
+    if lower.startswith("only the"):
+        return status.HTTP_403_FORBIDDEN
+    return status.HTTP_400_BAD_REQUEST
 
 
 @asynccontextmanager
@@ -346,6 +358,26 @@ def get_project_detail(
     )
 
 
+@app.patch("/api/v1/projects/{project_id}", response_model=ProjectResponse)
+def patch_project(
+    project_id: int,
+    body: ProjectUpdate,
+    user_id: int = Depends(require_internal_user),
+):
+    try:
+        row = update_project_fields(
+            project_id=project_id,
+            actor_user_id=user_id,
+            title=body.title,
+            description=body.description,
+            tech_stack=body.tech_stack,
+        )
+        return _to_project_response(row)
+    except ValueError as e:
+        msg = str(e)
+        raise HTTPException(status_code=_project_error_status(msg), detail=msg)
+
+
 @app.patch("/api/v1/projects/{project_id}/status", response_model=ProjectResponse)
 def patch_project_status(
     project_id: int,
@@ -362,8 +394,7 @@ def patch_project_status(
         return _to_project_response(row)
     except ValueError as e:
         msg = str(e)
-        code = status.HTTP_404_NOT_FOUND if "not found" in msg.lower() else status.HTTP_400_BAD_REQUEST
-        raise HTTPException(status_code=code, detail=msg)
+        raise HTTPException(status_code=_project_error_status(msg), detail=msg)
 
 
 @app.post(
@@ -388,8 +419,7 @@ def post_interested(
         )
     except ValueError as e:
         msg = str(e)
-        code = status.HTTP_404_NOT_FOUND if "not found" in msg.lower() else status.HTTP_400_BAD_REQUEST
-        raise HTTPException(status_code=code, detail=msg)
+        raise HTTPException(status_code=_project_error_status(msg), detail=msg)
 
 
 @app.delete("/api/v1/projects/{project_id}/interested", status_code=status.HTTP_204_NO_CONTENT)

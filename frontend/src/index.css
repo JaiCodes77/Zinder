@@ -21,7 +21,8 @@
   --color-accent-close: #e5534b;
   --color-accent-star: #e3b341;
   --color-text-primary: #e6edf3;
-  --color-text-muted: #7d8590;
+  /* Muted/subtle tuned for ~AA on #0a0e12 (was too dim for body/hints) */
+  --color-text-muted: #8b949e;
 
   /* Ink scale — cool graphite, not warm navy */
   --color-ink-950: #0a0e12;
@@ -31,8 +32,8 @@
   --color-ink-750: #222b36;
 
   --color-fg: #e6edf3;
-  --color-fg-muted: #7d8590;
-  --color-fg-subtle: #5c6570;
+  --color-fg-muted: #8b949e;
+  --color-fg-subtle: #7d8590;
 
   /* Brand aliases */
   --color-accent: #b990ff;
@@ -69,7 +70,7 @@
   --accent-close: #e5534b;
   --accent-star: #e3b341;
   --text-primary: #e6edf3;
-  --text-muted: #7d8590;
+  --text-muted: #8b949e;
   --danger: #e5534b;
   --glass-border: rgba(255, 255, 255, 0.08);
   --ease-merge: cubic-bezier(0.22, 1, 0.36, 1);
@@ -515,8 +516,13 @@
   }
 
   :focus-visible {
-    outline: 2px solid rgba(185, 144, 255, 0.7);
+    outline: 2px solid rgba(201, 168, 255, 0.9);
     outline-offset: 2px;
+  }
+
+  /* Prefer visible focus over mouse-click outlines */
+  :focus:not(:focus-visible) {
+    outline: none;
   }
 }
 
@@ -746,6 +752,23 @@
   border-radius: var(--radius-glass);
 }
 
+/* Matches chat — Merge chrome (outgoing = merge green, incoming = glass) */
+.chat-bubble {
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  color: var(--color-fg);
+}
+.chat-bubble--out {
+  background: rgba(63, 185, 80, 0.1);
+  border: 1px solid rgba(63, 185, 80, 0.28);
+  border-radius: 16px 16px 4px 16px;
+}
+.chat-bubble--in {
+  background: var(--surface-glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px 16px 16px 4px;
+}
+
 .card {
   background: var(--surface-glass);
   backdrop-filter: blur(var(--blur-glass));
@@ -855,6 +878,39 @@ textarea:-webkit-autofill {
 .btn-ghost:focus-visible,
 button:focus-visible {
   outline: 2px solid rgba(185, 144, 255, 0.7);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 0.75rem;
+  top: 0.75rem;
+  z-index: 100;
+  padding: 0.5rem 0.85rem;
+  border-radius: 10px;
+  background: var(--accent-brand);
+  color: #0a0e12;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  transform: translateY(-150%);
+  transition: transform 0.15s var(--ease-merge);
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 2px solid rgba(230, 237, 243, 0.9);
   outline-offset: 2px;
 }
 

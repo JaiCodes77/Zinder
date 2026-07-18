@@ -1,6 +1,6 @@
 import type { ProjectHelpView } from './types';
 
-/** Hash routes — Zinder has no React Router; Project Help uses `#/project-help…`. */
+/** Project Help sub-routes under the shell hash (`#/project-help…`). See `lib/appRoutes.ts`. */
 export function parseProjectHelpHash(
   hash: string = typeof window !== 'undefined' ? window.location.hash : ''
 ): { view: ProjectHelpView; id: number | null } {
