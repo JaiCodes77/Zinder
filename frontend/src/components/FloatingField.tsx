@@ -47,7 +47,7 @@ export const FloatingField: React.FC<FloatingFieldProps> = ({
         htmlFor={id}
         className={`pointer-events-none absolute left-3.5 transition-all duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] ${
           floated
-            ? 'top-1.5 text-[10px] font-medium text-accent-warm tracking-wide'
+            ? 'top-1.5 text-[10px] font-medium text-accent-brand tracking-wide'
             : 'top-1/2 -translate-y-1/2 text-[13px] text-fg-subtle'
         } ${as === 'textarea' && !floated ? 'top-3.5 translate-y-0' : ''}`}
       >

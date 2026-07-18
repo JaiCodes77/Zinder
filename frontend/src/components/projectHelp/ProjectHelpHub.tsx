@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { RequestStatus } from '../RequestStepper';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
@@ -6,6 +6,7 @@ import { ProjectHelpDetail } from './ProjectHelpDetail';
 import { ProjectHelpList } from './ProjectHelpList';
 import { ProjectHelpNew } from './ProjectHelpNew';
 import { EASE, getInitials, seedThread } from './helpers';
+import { parseProjectHelpHash, projectHelpHash } from './routes';
 import type {
   ProjectHelpView,
   ProjectRequest,
@@ -40,8 +41,9 @@ export const ProjectHelpHub: React.FC<ProjectHelpHubProps> = ({
   onViewOwnProfile,
 }) => {
   const reduced = usePrefersReducedMotion();
-  const [view, setView] = useState<ProjectHelpView>('list');
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const initial = parseProjectHelpHash();
+  const [view, setView] = useState<ProjectHelpView>(initial.view);
+  const [selectedId, setSelectedId] = useState<number | null>(initial.id);
   const [helpingIds, setHelpingIds] = useState<Set<number>>(() => new Set());
   const [urgencyOverrides, setUrgencyOverrides] = useState<Record<number, Urgency>>({});
   const [threads, setThreads] = useState<Record<number, ThreadComment[]>>({});
@@ -59,6 +61,31 @@ export const ProjectHelpHub: React.FC<ProjectHelpHubProps> = ({
     );
   })();
 
+  const navigate = useCallback((next: ProjectHelpView, id: number | null = null) => {
+    setView(next);
+    setSelectedId(id);
+    const target = projectHelpHash(next, id);
+    if (window.location.hash !== target) {
+      window.location.hash = target;
+    }
+  }, []);
+
+  useEffect(() => {
+    const onHash = () => {
+      const parsed = parseProjectHelpHash();
+      setView(parsed.view);
+      setSelectedId(parsed.id);
+    };
+    window.addEventListener('hashchange', onHash);
+    // Ensure list lands on a canonical hash when hub mounts without one
+    if (!window.location.hash.includes('project-help')) {
+      window.location.hash = projectHelpHash('list');
+    } else {
+      onHash();
+    }
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
   useEffect(() => {
     setThreads((prev) => {
       const next = { ...prev };
@@ -73,12 +100,16 @@ export const ProjectHelpHub: React.FC<ProjectHelpHubProps> = ({
     });
   }, [projects, localExtra]);
 
-  const selected = mergedProjects.find((p) => p.id === selectedId) ?? null;
+  // If hash points at a missing id while projects are loading, wait; if loaded and missing, fall back.
+  useEffect(() => {
+    if (view !== 'detail' || selectedId == null || loadingProjects) return;
+    const exists =
+      projects.some((p) => p.id === selectedId) ||
+      localExtra.some((p) => p.id === selectedId);
+    if (!exists) navigate('list');
+  }, [view, selectedId, loadingProjects, projects, localExtra, navigate]);
 
-  const openDetail = (id: number) => {
-    setSelectedId(id);
-    setView('detail');
-  };
+  const selected = mergedProjects.find((p) => p.id === selectedId) ?? null;
 
   const handleCreate = async (payload: {
     title: string;
@@ -158,8 +189,11 @@ export const ProjectHelpHub: React.FC<ProjectHelpHubProps> = ({
               helpingIds={helpingIds}
               projectStatuses={projectStatuses}
               urgencyOverrides={urgencyOverrides}
-              onOpenDetail={openDetail}
-              onNewRequest={() => setView('new')}
+              onOpenDetail={(id) => navigate('detail', id)}
+              onNewRequest={() => navigate('new')}
+              onStatusChange={(id, next) =>
+                setProjectStatuses((prev) => ({ ...prev, [id]: next }))
+              }
             />
           )}
 
@@ -170,13 +204,9 @@ export const ProjectHelpHub: React.FC<ProjectHelpHubProps> = ({
               comments={threads[selected.id] || seedThread(selected)}
               isOwn={myUserId != null && selected.user_id === myUserId}
               alreadyHelping={helpingIds.has(selected.id)}
-              onBack={() => {
-                setView('list');
-                setSelectedId(null);
-              }}
+              onBack={() => navigate('list')}
               onViewProfile={(userId) => {
                 if (myUserId != null && userId === myUserId) onViewOwnProfile();
-                // Assumption: no public /profile/:id route yet — only own profile navigates.
               }}
               onStatusChange={(next) =>
                 setProjectStatuses((prev) => ({ ...prev, [selected.id]: next }))
@@ -185,16 +215,19 @@ export const ProjectHelpHub: React.FC<ProjectHelpHubProps> = ({
             />
           )}
 
+          {view === 'detail' && !selected && loadingProjects && (
+            <div className="max-w-xl mx-auto glass rounded-[18px] p-8 text-center">
+              <p className="text-[14px] text-fg-muted">Loading request…</p>
+            </div>
+          )}
+
           {view === 'new' && myUserId != null && (
             <ProjectHelpNew
               myName={myName}
               myUserId={myUserId}
-              onCancel={() => setView('list')}
+              onCancel={() => navigate('list')}
               onSubmit={handleCreate}
-              onCreated={(created) => {
-                setSelectedId(created.id);
-                setView('detail');
-              }}
+              onCreated={(created) => navigate('detail', created.id)}
             />
           )}
 
@@ -203,7 +236,7 @@ export const ProjectHelpHub: React.FC<ProjectHelpHubProps> = ({
               <p className="text-[14px] text-fg-muted">Loading your profile…</p>
               <button
                 type="button"
-                onClick={() => setView('list')}
+                onClick={() => navigate('list')}
                 className="btn-ghost mt-4 px-4 py-2 rounded-[12px] text-[13px]"
               >
                 Back to list

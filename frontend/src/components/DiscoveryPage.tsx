@@ -9,19 +9,18 @@ import {
   LayoutGroup,
 } from 'framer-motion';
 import {
-  Heart,
+  GitMerge,
+  CircleSlash,
   X,
   Undo2,
   Star,
   MessageCircle,
   User,
   Compass,
-  LogOut,
   Code2,
   Send,
   Loader2,
   ChevronLeft,
-  ChevronRight,
   MapPin,
   Check,
   CheckCheck,
@@ -36,7 +35,23 @@ import { CompatibilityRing } from './CompatibilityRing';
 import { type RequestStatus } from './RequestStepper';
 import { ProfilePage } from './ProfilePage';
 import { ProjectHelpHub, type ProjectRequest } from './projectHelp';
+import { isProjectHelpHash, projectHelpHash } from './projectHelp/routes';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
+import { techChipTone } from '../lib/languageColors';
+import { ActivityBar, type ActivityTab } from './ActivityBar';
+import { CommandPalette, CommandPaletteHint } from './CommandPalette';
+
+const ACTIVITY_BAR_COLLAPSED_KEY = 'zinder.activityBar.collapsed';
+
+function readActivityBarCollapsed(): boolean {
+  try {
+    const v = localStorage.getItem(ACTIVITY_BAR_COLLAPSED_KEY);
+    if (v === null) return true; // default: icon rail
+    return v === '1';
+  } catch {
+    return true;
+  }
+}
 
 // ==========================================
 // TYPES
@@ -49,7 +64,26 @@ interface Profile {
   bio: string;
   image: string;
   interests: string[];
+  /** Server-computed compatibility (0–100), when browse returns it. */
+  score?: number;
+  distanceKm?: number | null;
 }
+
+/** Canonical Discover filter chips — always shown (not derived from a thin seed set). */
+const DISCOVER_FILTER_TAGS = [
+  'Python',
+  'Redis',
+  'FastAPI',
+  'React',
+  'Node.js',
+  'Rust',
+  'TypeScript',
+  'WebSockets',
+  'Monaco Editor',
+  'Go',
+  'Docker',
+  'GraphQL',
+] as const;
 
 interface Match {
   id: number | string;
@@ -119,7 +153,8 @@ const RequestSkeleton: React.FC = () => (
 
 function scoreCompatibility(candidate: Profile, me: { interests?: string[] } | null): number {
   const mine = new Set((me?.interests || []).map((i) => i.toLowerCase()));
-  if (mine.size === 0) return 42 + (candidate.id % 30);
+  // Spread across <50 / 50–79 / ≥80 so Browse size + ring bands are always visible.
+  if (mine.size === 0) return 28 + ((candidate.id * 37) % 71);
   const theirs = candidate.interests.map((i) => i.toLowerCase());
   const overlap = theirs.filter((i) => mine.has(i)).length;
   const base = Math.round((overlap / Math.max(mine.size, 1)) * 70) + 25;
@@ -136,27 +171,30 @@ const CHAT_STARTERS = ['👋 Say hi', 'Ask about their stack', 'What are you bui
 
 const DateSeparator: React.FC<{ label: string }> = ({ label }) => (
   <div className="flex justify-center py-2">
-    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono tracking-wide text-fg-subtle bg-white/6 border border-white/10">
+    <span className="px-2.5 py-0.5 rounded-full text-[11px] tracking-wide text-fg-subtle bg-white/6 border border-white/10">
       {label}
     </span>
   </div>
 );
 
-const OnlinePresence: React.FC<{ reducedMotion: boolean; size?: 'sm' | 'md' }> = ({
-  reducedMotion,
-  size = 'md',
-}) => {
+const OnlinePresence: React.FC<{
+  reducedMotion: boolean;
+  size?: 'sm' | 'md';
+  /** Chat uses a soft human pulse; list keeps quiet tool chrome. */
+  tone?: 'tool' | 'human';
+}> = ({ reducedMotion, size = 'md', tone = 'tool' }) => {
   const dot = size === 'sm' ? 'w-2 h-2' : 'w-2.5 h-2.5';
+  const color = tone === 'human' ? 'bg-fg-muted' : 'bg-accent-merge';
   return (
     <span className={`absolute bottom-0 right-0 ${dot} flex items-center justify-center`}>
       {!reducedMotion && (
         <motion.span
-          className="absolute inset-0 rounded-full bg-accent-cool/55"
+          className={`absolute inset-0 rounded-full ${color}/55`}
           animate={{ scale: [1, 1.75], opacity: [0.55, 0] }}
           transition={{ duration: 2.2, repeat: Infinity, ease: 'easeOut' }}
         />
       )}
-      <span className={`relative ${dot} rounded-full bg-accent-cool border-[1.5px] border-bg-base`} />
+      <span className={`relative ${dot} rounded-full ${color} border-[1.5px] border-bg-base`} />
     </span>
   );
 };
@@ -167,32 +205,27 @@ const MatchEmptyChat: React.FC<{
   reducedMotion: boolean;
   onSuggest: (text: string) => void;
 }> = ({ name, avatar, reducedMotion, onSuggest }) => (
-  <div className="h-full flex flex-col items-center justify-center text-center px-4">
-    <div className="relative mb-5 flex items-center justify-center">
+  <div className="flex-1 min-h-[320px] flex flex-col items-center justify-center text-center px-4">
+    {/* Radar ping — sized box so rings aren't clipped by the scroll parent */}
+    <div className="relative w-[140px] h-[140px] mb-2 flex items-center justify-center">
       {[0, 1].map((i) => (
         <motion.div
           key={i}
-          className="absolute rounded-full border border-accent-cool/35 pointer-events-none"
-          style={{ width: 64 + i * 28, height: 64 + i * 28 }}
+          className="absolute w-14 h-14 rounded-full border border-white/25 pointer-events-none"
           initial={false}
           animate={
             reducedMotion
-              ? { opacity: 0.22, scale: 1 }
-              : { scale: [1, 1.55], opacity: [0.4, 0] }
+              ? { opacity: 0.28, scale: 1 + i * 0.35 }
+              : { scale: [1, 1.8], opacity: [0.5, 0] }
           }
           transition={
             reducedMotion
               ? { duration: 0 }
-              : {
-                  duration: 2.6,
-                  repeat: Infinity,
-                  delay: i * 0.75,
-                  ease: 'easeOut',
-                }
+              : { duration: 2, repeat: Infinity, ease: 'easeOut', delay: i * 1 }
           }
         />
       ))}
-      <div className="relative z-10 w-14 h-14 rounded-full overflow-hidden border border-white/14 shadow-[0_0_0_1px_rgba(94,234,212,0.12)]">
+      <div className="relative z-10 w-14 h-14 rounded-full overflow-hidden border border-white/14">
         <img src={avatar} alt={name} className="w-full h-full object-cover" />
       </div>
     </div>
@@ -200,55 +233,133 @@ const MatchEmptyChat: React.FC<{
     <motion.div
       initial={reducedMotion ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: reducedMotion ? 0 : 0.55, duration: 0.4, ease: EASE }}
+      transition={{ delay: reducedMotion ? 0 : 0.45, duration: 0.4, ease: EASE }}
       className="space-y-1"
     >
-      <p className="text-[13px] text-fg-muted">
-        You matched with <span className="text-fg font-medium">{name}</span>
+      <p className="display text-lg text-fg">
+        You matched with {name}
       </p>
-      <p className="text-xs text-fg-subtle">Say hi and start the conversation.</p>
+      <p className="text-sm text-fg-muted mt-1">Say hi and start the conversation.</p>
     </motion.div>
 
-    <div className="mt-5 flex flex-wrap items-center justify-center gap-2 max-w-[320px]">
+    <div className="mt-5 flex flex-wrap items-center justify-center gap-2 max-w-[340px]">
       {CHAT_STARTERS.map((label, i) => (
         <motion.button
           key={label}
           type="button"
           onClick={() => onSuggest(label)}
           initial={reducedMotion ? false : { opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{
-            delay: reducedMotion ? 0 : 0.75 + i * 0.1,
-            duration: reducedMotion ? 0 : 0.35,
-            ease: EASE,
-          }}
-          className="px-3 py-1.5 rounded-full text-[12px] text-fg-muted bg-white/6 border border-white/12 hover:bg-white/10 hover:text-fg hover:border-accent-warm/30 transition-colors duration-200"
-        >
-          <motion.span
-            className="inline-block"
-            animate={reducedMotion ? undefined : { y: [0, -3, 0] }}
-            transition={
-              reducedMotion
-                ? { duration: 0 }
-                : {
-                    delay: 1.15 + i * 0.4,
-                    duration: 3.4 + i * 0.45,
+          animate={
+            reducedMotion
+              ? { opacity: 1, y: 0 }
+              : { opacity: 1, y: [0, -3, 0] }
+          }
+          transition={
+            reducedMotion
+              ? { duration: 0 }
+              : {
+                  opacity: { delay: 0.65 + i * 0.08, duration: 0.3, ease: EASE },
+                  y: {
+                    delay: 1 + i * 0.45,
+                    duration: 3.2 + i * 0.5,
                     repeat: Infinity,
                     ease: 'easeInOut',
-                  }
-            }
-          >
-            {label}
-          </motion.span>
+                  },
+                }
+          }
+          className="px-3 py-1.5 rounded-full text-[12px] text-fg-muted bg-white/6 border border-white/12 hover:bg-white/10 hover:text-fg hover:border-white/25 transition-colors duration-200"
+        >
+          {label}
         </motion.button>
       ))}
     </div>
   </div>
 );
 
+const NoConversationOpen: React.FC<{
+  matches: Match[];
+  reducedMotion: boolean;
+  onSelect: (match: Match) => void;
+}> = ({ matches, reducedMotion, onSelect }) => (
+  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+    <motion.div
+      className="w-12 h-12 rounded-full bg-white/6 border border-white/12 flex items-center justify-center mb-4 text-fg-subtle"
+      animate={reducedMotion ? undefined : { y: [0, -4, 0] }}
+      transition={
+        reducedMotion
+          ? { duration: 0 }
+          : { duration: 3, repeat: Infinity, ease: 'easeInOut' }
+      }
+    >
+      <MessageCircle className="w-5 h-5" />
+    </motion.div>
+    <h3 className="text-sm font-semibold text-fg">Your messages</h3>
+    <p className="text-[13px] text-fg-muted mt-1.5 max-w-[240px] leading-relaxed">
+      Select a match to start the conversation.
+    </p>
+
+    {matches.length > 0 && (
+      <div className="mt-6 flex items-center justify-center gap-2.5 flex-wrap max-w-[280px]">
+        {matches.slice(0, 6).map((match, i) => (
+          <motion.button
+            key={match.id}
+            type="button"
+            title={match.name}
+            aria-label={`Open chat with ${match.name}`}
+            onClick={() => onSelect(match)}
+            initial={reducedMotion ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{
+              delay: reducedMotion ? 0 : i * 0.05,
+              duration: reducedMotion ? 0 : 0.35,
+              ease: EASE,
+            }}
+            className="relative w-10 h-10 rounded-full overflow-hidden border border-white/14 hover:border-accent-brand/50 hover:scale-105 transition-[border-color,transform] duration-200"
+          >
+            <img src={match.avatar} alt={match.name} className="w-full h-full object-cover" />
+          </motion.button>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
 function parseDistanceMiles(distance: string): number {
   const n = parseFloat(distance.replace(/[^\d.]/g, ''));
   return Number.isFinite(n) ? n : 99;
+}
+
+function formatDistanceKm(km: unknown, fallback?: string | null): string {
+  if (typeof km === 'number' && Number.isFinite(km)) {
+    const miles = km * 0.621371;
+    if (miles < 0.1) return 'Nearby';
+    const rounded = miles < 10 ? miles.toFixed(1) : String(Math.round(miles));
+    return `${rounded} miles away`;
+  }
+  if (typeof fallback === 'string' && fallback.trim()) return fallback;
+  return 'Distance unknown';
+}
+
+function extractBrowseItems(data: unknown): unknown[] | null {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object' && Array.isArray((data as { items?: unknown }).items)) {
+    return (data as { items: unknown[] }).items;
+  }
+  return null;
+}
+
+function mapBrowseItem(p: any): Profile {
+  return {
+    id: p.user_id,
+    name: p.name || p.user?.name || 'Developer',
+    age: p.age || 25,
+    distance: formatDistanceKm(p.distance_km, p.distance),
+    bio: p.bio || 'This developer hasn’t written a bio yet.',
+    image: p.image || '/profile_3.png',
+    interests: Array.isArray(p.interests) ? p.interests : [],
+    score: typeof p.score === 'number' ? p.score : undefined,
+    distanceKm: typeof p.distance_km === 'number' ? p.distance_km : null,
+  };
 }
 
 function useIsCoarsePointer(): boolean {
@@ -266,41 +377,20 @@ function useIsCoarsePointer(): boolean {
 }
 
 const SPRING_PRESS = { type: 'spring' as const, stiffness: 520, damping: 18 };
-const SPRING_STACK = { type: 'spring' as const, stiffness: 320, damping: 28 };
+/** Spec: spring forward when stack reflows after a swipe. */
+const SPRING_STACK = { type: 'spring' as const, stiffness: 300, damping: 30 };
 const SPRING_PILL = { type: 'spring' as const, stiffness: 380, damping: 32 };
 
-/** Peeking stack card (non-interactive) behind the active deck card. */
-const StackPeekCard: React.FC<{ profile: Profile; stackPos: number; reducedMotion: boolean }> = ({
-  profile,
-  stackPos,
-  reducedMotion,
-}) => {
-  const scale = stackPos === 1 ? 0.95 : 0.9;
-  const y = stackPos === 1 ? 12 : 24;
-  const opacity = stackPos === 1 ? 0.6 : 0.35;
-
-  return (
-    <motion.div
-      className="absolute inset-0 rounded-[18px] overflow-hidden border border-white/10 pointer-events-none"
-      style={{ zIndex: 10 - stackPos }}
-      initial={false}
-      animate={
-        reducedMotion
-          ? { scale: 1, y: 0, opacity: 0.45 }
-          : { scale, y, opacity }
-      }
-      transition={reducedMotion ? { duration: 0 } : SPRING_STACK}
-    >
-      <img
-        src={profile.image}
-        alt=""
-        draggable={false}
-        className="w-full h-full object-cover select-none"
-      />
-      <div className="absolute inset-0 bg-bg-base/40" />
-    </motion.div>
-  );
-};
+function stackAnimate(index: number, reducedMotion: boolean) {
+  if (reducedMotion) {
+    if (index === 0) return { scale: 1, y: 0, opacity: 1 };
+    if (index === 1) return { scale: 0.97, y: 8, opacity: 0.5 };
+    return { scale: 0.94, y: 14, opacity: 0.3 };
+  }
+  if (index === 0) return { scale: 1, y: 0, opacity: 1 };
+  if (index === 1) return { scale: 0.94, y: 14, opacity: 0.55 };
+  return { scale: 0.88, y: 26, opacity: 0.3 };
+}
 
 /** Photo plane with subtle pointer parallax (disabled on touch / reduced motion). */
 const ParallaxPhoto: React.FC<{
@@ -359,11 +449,22 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
   const reducedMotion = usePrefersReducedMotion();
   const coarsePointer = useIsCoarsePointer();
   const parallaxEnabled = !reducedMotion && !coarsePointer;
-  const [activeTab, setActiveTab] = useState<'discover' | 'matches' | 'profile' | 'projectHelp'>(
-    'discover'
-  );
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [activeTab, setActiveTab] = useState<ActivityTab>('discover');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readActivityBarCollapsed);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [discoverView, setDiscoverView] = useState<'deck' | 'browse'>('deck');
+
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(ACTIVITY_BAR_COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        /* ignore quota / private mode */
+      }
+      return next;
+    });
+  }, []);
 
   const [myProfile, setMyProfile] = useState<any>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -375,6 +476,8 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
   const [history, setHistory] = useState<Profile[]>([]);
   const [likesCount, setLikesCount] = useState(0);
   const [loadingCandidates, setLoadingCandidates] = useState(true);
+  /** Set when browse fetch fails or returns an unparseable body — never treat as empty. */
+  const [candidatesError, setCandidatesError] = useState<string | null>(null);
   const [browseFilters, setBrowseFilters] = useState<string[]>([]);
   const [browseSort, setBrowseSort] = useState<'match' | 'newest' | 'nearby'>('match');
   const [selectedBrowseId, setSelectedBrowseId] = useState<number | null>(null);
@@ -403,10 +506,11 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
   const dragY = useMotionValue(0);
   const rotate = useTransform(dragX, [-200, 200], [-15, 15]);
   const cardOpacity = useTransform(dragX, [-200, -150, 0, 150, 200], [0.6, 0.95, 1, 0.95, 0.6]);
-  const likeOpacity = useTransform(dragX, [0, 60, 130], [0, 0, 1]);
-  const likeScale = useTransform(dragX, [60, 130], [0.75, 1]);
-  const nopeOpacity = useTransform(dragX, [-130, -60, 0], [1, 0, 0]);
-  const nopeScale = useTransform(dragX, [-130, -60], [1, 0.75]);
+  // MERGE / CLOSE stamp opacities from dragX
+  const likeOpacity = useTransform(dragX, [0, 120], [0, 1]);
+  const likeScale = useTransform(dragX, [0, 120], [0.8, 1]);
+  const nopeOpacity = useTransform(dragX, [-120, 0], [1, 0]);
+  const nopeScale = useTransform(dragX, [-120, 0], [1, 0.8]);
   const superLikeOpacity = useTransform(dragY, [-130, -60, 0], [1, 0, 0]);
   const superLikeScale = useTransform(dragY, [-130, -60], [1, 0.8]);
 
@@ -454,32 +558,53 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
     }
   };
 
-  const fetchCandidates = async () => {
+  const fetchCandidates = useCallback(async () => {
     try {
       setLoadingCandidates(true);
-      const res = await fetch('http://localhost:8080/api/v1/matcher/browse', {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setProfiles(
-          data.map((p: any) => ({
-            id: p.user_id,
-            name: p.user?.name || 'Developer',
-            age: p.age || 25,
-            distance: p.distance || '1 mile away',
-            bio: p.bio || 'This developer hasn’t written a bio yet.',
-            image: p.image || '/profile_3.png',
-            interests: p.interests || [],
-          }))
-        );
+      setCandidatesError(null);
+
+      // Tags stay client-side for snappy chip toggles; sort/limit match the browse contract.
+      const sortParam =
+        browseSort === 'newest' ? 'newest' : browseSort === 'nearby' ? 'nearby' : 'best';
+      const params = new URLSearchParams({ sort: sortParam, limit: '50' });
+
+      const res = await fetch(
+        `http://localhost:8080/api/v1/matcher/browse?${params.toString()}`,
+        { credentials: 'include' }
+      );
+
+      if (!res.ok) {
+        setProfiles([]);
+        setCandidatesError("Couldn't load candidates. Try again.");
+        return;
       }
+
+      let data: unknown;
+      try {
+        data = await res.json();
+      } catch {
+        setProfiles([]);
+        setCandidatesError("Couldn't load candidates. Try again.");
+        return;
+      }
+
+      const items = extractBrowseItems(data);
+      if (!items) {
+        setProfiles([]);
+        setCandidatesError("Couldn't load candidates. Try again.");
+        return;
+      }
+
+      setProfiles(items.map(mapBrowseItem));
+      setCandidatesError(null);
     } catch (err) {
       console.error('Failed to fetch candidate profiles', err);
+      setProfiles([]);
+      setCandidatesError("Couldn't load candidates. Try again.");
     } finally {
       setLoadingCandidates(false);
     }
-  };
+  }, [browseSort]);
 
   const fetchMatches = async () => {
     try {
@@ -515,11 +640,48 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
     fetchMatches();
   }, []);
 
+  // Deep-link: `#/project-help`, `#/project-help/new`, `#/project-help/:id`
+  useEffect(() => {
+    const syncTabFromHash = () => {
+      if (isProjectHelpHash()) setActiveTab('projectHelp');
+    };
+    syncTabFromHash();
+    window.addEventListener('hashchange', syncTabFromHash);
+    return () => window.removeEventListener('hashchange', syncTabFromHash);
+  }, []);
+
+  const goToTab = (key: ActivityTab) => {
+    setActiveTab(key);
+    if (key !== 'projectHelp' && isProjectHelpHash()) {
+      window.history.replaceState(
+        null,
+        '',
+        window.location.pathname + window.location.search
+      );
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setCommandPaletteOpen((open) => !open);
+        return;
+      }
+      if (e.key === 'Escape' && commandPaletteOpen) {
+        setCommandPaletteOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [commandPaletteOpen]);
+
   useEffect(() => {
     if (activeTab === 'projectHelp' || activeTab === 'profile') fetchProjects();
     else if (activeTab === 'discover') fetchCandidates();
     else if (activeTab === 'matches') fetchMatches();
-  }, [activeTab]);
+  }, [activeTab, fetchCandidates]);
 
   const handleProjectOfferHelp = (proj: ProjectRequest, message: string) => {
     const projectHelpId = `project_help_${proj.id}`;
@@ -813,29 +975,40 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
   // ------------------------------------------
   // BROWSE FILTERS
   // ------------------------------------------
+  /** Fixed discover chips + any extra tags from the loaded pool (capped). */
   const allInterestChips = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set<string>(DISCOVER_FILTER_TAGS);
     profiles.forEach((p) => p.interests.forEach((i) => set.add(i)));
     (myProfile?.interests || []).forEach((i: string) => set.add(i));
-    return Array.from(set).slice(0, 12);
+    const canonical = DISCOVER_FILTER_TAGS.filter((t) => set.has(t));
+    const extras = Array.from(set)
+      .filter((t) => !DISCOVER_FILTER_TAGS.some((c) => c.toLowerCase() === t.toLowerCase()))
+      .slice(0, 4);
+    return [...canonical, ...extras];
   }, [profiles, myProfile]);
 
+  const browseScore = (p: Profile) =>
+    typeof p.score === 'number' ? p.score : scoreCompatibility(p, myProfile);
+
+  // Server already applies tags + sort; keep a light client pass for responsiveness / legacy shapes.
   const filteredBrowse = useMemo(() => {
     let list =
       browseFilters.length === 0
         ? [...profiles]
         : profiles.filter((p) =>
-            browseFilters.every((f) =>
+            browseFilters.some((f) =>
               p.interests.some((i) => i.toLowerCase() === f.toLowerCase())
             )
           );
 
     if (browseSort === 'match') {
-      list.sort(
-        (a, b) => scoreCompatibility(b, myProfile) - scoreCompatibility(a, myProfile)
-      );
+      list.sort((a, b) => browseScore(b) - browseScore(a));
     } else if (browseSort === 'nearby') {
-      list.sort((a, b) => parseDistanceMiles(a.distance) - parseDistanceMiles(b.distance));
+      list.sort((a, b) => {
+        const da = a.distanceKm ?? parseDistanceMiles(a.distance);
+        const db = b.distanceKm ?? parseDistanceMiles(b.distance);
+        return da - db;
+      });
     } else {
       list.sort((a, b) => b.id - a.id);
     }
@@ -852,146 +1025,47 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
   const selectedBrowse = profiles.find((p) => p.id === selectedBrowseId) || null;
 
   const navItems = [
-    { key: 'discover' as const, label: 'Discover', icon: Compass },
-    { key: 'matches' as const, label: 'Matches', icon: MessageCircle },
-    { key: 'projectHelp' as const, label: 'Project help', icon: Code2 },
-    { key: 'profile' as const, label: 'Profile', icon: User },
+    { key: 'discover' as const, label: 'Discover', icon: Compass, path: '~/zinder/discover' },
+    { key: 'matches' as const, label: 'Matches', icon: MessageCircle, path: '~/zinder/matches' },
+    { key: 'projectHelp' as const, label: 'Project help', icon: Code2, path: '~/zinder/project-help' },
+    { key: 'profile' as const, label: 'Profile', icon: User, path: '~/zinder/profile' },
   ];
 
-  const hasUnread = matches.some((m) => m.unread);
-
-  const actionPress = reducedMotion
-    ? {}
-    : { whileTap: { scale: 0.9 }, transition: SPRING_PRESS };
+  const breadcrumb = navItems.find((n) => n.key === activeTab)?.path ?? '~/zinder';
 
   return (
-    <div className="relative min-h-screen w-full flex bg-bg-base text-fg overflow-hidden">
+    <div
+      className="app-shell"
+      data-collapsed={sidebarCollapsed ? 'true' : 'false'}
+    >
+      {/* Absolute backdrop — must not participate in grid track sizing */}
       <GatewayNetwork />
 
-      {/* SIDEBAR */}
-      <aside
-        className={`hidden md:flex flex-col h-screen sticky top-0 border-r border-white/12 bg-bg-base/70 backdrop-blur-[20px] transition-[width] duration-200 z-20 ${
-          sidebarCollapsed ? 'w-[64px]' : 'w-60'
-        }`}
-      >
-        <div
-          className={`h-14 flex items-center border-b border-white/12 ${
-            sidebarCollapsed ? 'justify-center px-0' : 'justify-between px-4'
-          }`}
-        >
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="brand-mark w-7 h-7 rounded-[10px] flex items-center justify-center flex-shrink-0">
-              <span className="text-[13px] font-bold text-bg-base leading-none select-none">Z</span>
-            </div>
-            {!sidebarCollapsed && (
-              <span className="font-semibold text-[15px] tracking-tight text-fg truncate">Zinder</span>
-            )}
-          </div>
-          {!sidebarCollapsed && (
-            <button
-              type="button"
-              onClick={() => setSidebarCollapsed(true)}
-              aria-label="Collapse sidebar"
-              className="p-1 rounded-md text-fg-subtle hover:text-fg-muted hover:bg-white/5 transition-colors duration-200"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-          )}
+      <ActivityBar
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={toggleSidebarCollapsed}
+        navItems={navItems}
+        activeTab={activeTab}
+        onNavigate={goToTab}
+        matchCount={matches.length}
+        userName={myProfile?.user?.name}
+        userEmail={myProfile?.user?.email}
+        userInitials={myProfile?.user?.name ? getInitials(myProfile.user.name) : '··'}
+        onLogout={onLogout}
+        Avatar={Avatar}
+      />
+
+      <main className="main-content">
+        <div className="breadcrumb-bar breadcrumb-strip px-4 md:px-8 pt-3 pb-1">
+          <span className="select-none" aria-hidden>
+            {breadcrumb}
+          </span>
+          <CommandPaletteHint onClick={() => setCommandPaletteOpen(true)} />
         </div>
-
-        {sidebarCollapsed && (
-          <button
-            type="button"
-            onClick={() => setSidebarCollapsed(false)}
-            aria-label="Expand sidebar"
-            className="mx-auto mt-3 p-1.5 rounded-md text-fg-subtle hover:text-fg-muted hover:bg-white/5 transition-colors duration-200"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        )}
-
-        <nav className="flex-1 px-2.5 py-4 space-y-0.5">
-          {navItems.map(({ key, label, icon: Icon }) => {
-            const active = activeTab === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setActiveTab(key)}
-                title={sidebarCollapsed ? label : undefined}
-                className={`w-full flex items-center gap-2.5 rounded-[10px] text-[13px] font-medium transition-colors duration-200 relative h-9 ${
-                  sidebarCollapsed ? 'justify-center px-0' : 'px-3'
-                } ${active ? 'bg-white/10 text-fg' : 'text-fg-muted hover:text-fg hover:bg-white/5'}`}
-              >
-                <Icon className={`w-4 h-4 flex-shrink-0 ${active ? 'text-accent-warm' : ''}`} />
-                {!sidebarCollapsed && <span className="truncate">{label}</span>}
-                {key === 'matches' && hasUnread && (
-                  <span
-                    className={`absolute w-1.5 h-1.5 rounded-full bg-accent-cool ${
-                      sidebarCollapsed ? 'top-1.5 right-1.5' : 'right-3 top-1/2 -translate-y-1/2'
-                    }`}
-                  />
-                )}
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="border-t border-white/12 p-3">
-          <div className={`flex items-center gap-2.5 ${sidebarCollapsed ? 'justify-center' : ''}`}>
-            <Avatar initials={myProfile ? getInitials(myProfile.user.name) : '··'} size="w-8 h-8 text-[11px]" />
-            {!sidebarCollapsed && (
-              <>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-medium text-fg truncate leading-tight">
-                    {myProfile ? myProfile.user.name : 'Loading…'}
-                  </p>
-                  <p className="text-[11px] text-fg-subtle truncate leading-tight mt-0.5">
-                    {myProfile ? myProfile.user.email : ''}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={onLogout}
-                  title="Sign out"
-                  className="p-1.5 rounded-md text-fg-subtle hover:text-danger hover:bg-danger/10 transition-colors duration-200 flex-shrink-0"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </aside>
-
-      {/* MOBILE NAV */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-bg-base/85 backdrop-blur-[20px] border-t border-white/12 flex justify-around items-center z-30 px-2">
-        {navItems.map(({ key, label, icon: Icon }) => {
-          const active = activeTab === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setActiveTab(key)}
-              className={`relative flex flex-col items-center justify-center gap-1 px-3 py-1 text-[10px] font-medium transition-colors duration-200 ${
-                active ? 'text-accent-warm' : 'text-fg-subtle'
-              }`}
-            >
-              <Icon className="w-5 h-5" />
-              <span>{label}</span>
-              {key === 'matches' && hasUnread && (
-                <span className="absolute top-0.5 right-2 w-1.5 h-1.5 rounded-full bg-accent-cool" />
-              )}
-            </button>
-          );
-        })}
-      </nav>
-
-      <main className="flex-1 flex flex-col min-h-screen pb-16 md:pb-0 z-10 overflow-y-auto">
         {/* ========== MATCH / PROFILE MATCHER ========== */}
         {activeTab === 'discover' && (
-          <div className="flex-1 flex flex-col items-center p-4 md:p-8 w-full">
-            <div className="w-full max-w-[720px] flex justify-between items-end mb-5 gap-3">
+          <div className="flex-1 flex flex-col items-center px-4 pb-4 md:px-8 md:pb-8 w-full">
+            <div className="w-full max-w-[960px] flex justify-between items-end mb-5 gap-3">
               <div>
                 <h1 className="text-lg font-semibold tracking-tight text-fg">Discover</h1>
                 <p className="text-[13px] text-fg-muted mt-0.5">
@@ -1038,233 +1112,254 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
 
             {/* ---- DECK (Match Screen) ---- */}
             {discoverView === 'deck' && (
-              <div className="flex flex-col items-center w-full">
-                <div className="relative w-full max-w-[380px] aspect-[3/4.2]">
-                  {/* Ambient drifting blobs */}
-                  {!reducedMotion && (
-                    <>
-                      <motion.div
-                        aria-hidden
-                        className="absolute -top-24 -left-28 w-[280px] h-[280px] rounded-full pointer-events-none"
-                        style={{
-                          background:
-                            'radial-gradient(circle, rgba(232,166,89,0.08) 0%, transparent 70%)',
-                        }}
-                        animate={{ x: [0, 28, -12, 0], y: [0, 18, -14, 0] }}
-                        transition={{ duration: 24, repeat: Infinity, ease: 'linear' }}
-                      />
-                      <motion.div
-                        aria-hidden
-                        className="absolute -bottom-28 -right-24 w-[300px] h-[300px] rounded-full pointer-events-none"
-                        style={{
-                          background:
-                            'radial-gradient(circle, rgba(94,234,212,0.06) 0%, transparent 70%)',
-                        }}
-                        animate={{ x: [0, -22, 16, 0], y: [0, -16, 12, 0] }}
-                        transition={{ duration: 28, repeat: Infinity, ease: 'linear' }}
-                      />
-                    </>
-                  )}
+              <div className="relative flex flex-col items-center w-full max-w-[640px]">
+                {/* Atmosphere layer — wider than the card so blobs stay visible */}
+                {!reducedMotion && (
+                  <div className="pointer-events-none absolute inset-0 z-0 overflow-visible" aria-hidden>
+                    <div className="discover-blob-a" />
+                    <div className="discover-blob-b" />
+                  </div>
+                )}
 
-                  <AnimatePresence>
-                    {loadingCandidates ? (
-                      <motion.div
-                        key="loading-candidates"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="absolute inset-0 glass rounded-[18px] flex items-center justify-center z-20"
+                {/* Extra bottom space so scaled/peeking cards aren't clipped */}
+                <div className="relative z-[1] w-full max-w-[380px] aspect-[3/4.2] mb-8 overflow-visible">
+                  {loadingCandidates && profiles.length === 0 ? (
+                    <div className="absolute inset-0 glass rounded-[18px] flex items-center justify-center z-[3]">
+                      <Spinner label="loading candidates" />
+                    </div>
+                  ) : candidatesError ? (
+                    <div className="absolute inset-0 glass rounded-[18px] flex flex-col items-center justify-center p-8 text-center z-[1]">
+                      <h3 className="text-base font-semibold text-fg mb-1.5">Couldn’t load candidates</h3>
+                      <p className="text-[13px] text-fg-muted max-w-[240px] leading-relaxed">
+                        Something went wrong fetching the feed. Try again.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => fetchCandidates()}
+                        className="btn-ghost mt-6 px-4 py-2 rounded-[12px] text-[13px]"
                       >
-                        <Spinner label="loading candidates" />
-                      </motion.div>
-                    ) : activeProfile ? (
-                      <>
-                        {/* Peeking stack behind active card */}
-                        {profiles.slice(1, 3).map((p, i) => (
-                          <StackPeekCard
-                            key={p.id}
-                            profile={p}
-                            stackPos={i + 1}
-                            reducedMotion={reducedMotion}
-                          />
-                        ))}
-
-                        <motion.div
-                          key={activeProfile.id}
-                          drag={!reducedMotion}
-                          dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
-                          dragElastic={0.65}
-                          onDragEnd={handleDragEnd}
-                          style={{
-                            x: dragX,
-                            y: dragY,
-                            rotate: reducedMotion ? 0 : rotate,
-                            opacity: cardOpacity,
-                            zIndex: 20,
-                          }}
-                          initial={false}
-                          animate={
-                            reducedMotion
-                              ? { scale: 1, y: 0 }
-                              : { scale: 1, y: 0 }
-                          }
-                          transition={SPRING_STACK}
-                          className="absolute inset-0 rounded-[18px] overflow-hidden cursor-grab active:cursor-grabbing flex flex-col border border-white/12 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.55)]"
-                        >
-                          {/* LIKE stamp — amber, top-right */}
+                        Try again
+                      </button>
+                    </div>
+                  ) : profiles.length === 0 ? (
+                    <div className="absolute inset-0 glass rounded-[18px] flex flex-col items-center justify-center p-8 text-center z-[1]">
+                      <div className="w-12 h-12 rounded-full bg-white/6 border border-white/12 flex items-center justify-center mb-5">
+                        <Compass className="w-5 h-5 text-fg-subtle" />
+                      </div>
+                      <h3 className="text-base font-semibold text-fg mb-1.5">You’re all caught up</h3>
+                      <p className="text-[13px] text-fg-muted max-w-[240px] leading-relaxed">
+                        No more profiles to review right now. Check back soon.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => fetchCandidates()}
+                        className="btn-ghost mt-6 px-4 py-2 rounded-[12px] text-[13px]"
+                      >
+                        Check again
+                      </button>
+                    </div>
+                  ) : (
+                    <AnimatePresence mode="popLayout">
+                      {profiles.slice(0, 3).map((profile, index) => {
+                        const isTop = index === 0;
+                        return (
                           <motion.div
-                            style={{ opacity: likeOpacity, scale: likeScale }}
-                            className="absolute top-7 right-5 rotate-12 px-3.5 py-1.5 border-[2.5px] border-accent-warm text-accent-warm rounded-md font-bold text-xl tracking-[0.2em] uppercase z-30 pointer-events-none origin-center"
+                            key={profile.id}
+                            layout
+                            initial={false}
+                            animate={
+                              isTop
+                                ? { scale: 1 }
+                                : stackAnimate(index, reducedMotion)
+                            }
+                            exit={
+                              reducedMotion
+                                ? { opacity: 0 }
+                                : { opacity: 0, scale: 0.92, transition: { duration: 0.2 } }
+                            }
+                            transition={SPRING_STACK}
+                            drag={isTop && !reducedMotion}
+                            dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+                            dragElastic={0.65}
+                            onDragEnd={isTop ? handleDragEnd : undefined}
+                            style={
+                              isTop
+                                ? {
+                                    x: dragX,
+                                    y: dragY,
+                                    rotate: reducedMotion ? 0 : rotate,
+                                    opacity: cardOpacity,
+                                    zIndex: 3,
+                                    pointerEvents: 'auto',
+                                  }
+                                : {
+                                    zIndex: index === 1 ? 2 : 1,
+                                    pointerEvents: 'none',
+                                  }
+                            }
+                            className={`absolute inset-0 rounded-[18px] overflow-hidden border border-white/12 origin-top ${
+                              isTop
+                                ? 'cursor-grab active:cursor-grabbing shadow-[0_20px_50px_-20px_rgba(0,0,0,0.55)]'
+                                : 'shadow-[0_12px_32px_-18px_rgba(0,0,0,0.45)]'
+                            }`}
                           >
-                            Like
-                          </motion.div>
-                          {/* NOPE stamp — coral, top-left */}
-                          <motion.div
-                            style={{ opacity: nopeOpacity, scale: nopeScale }}
-                            className="absolute top-7 left-5 -rotate-12 px-3.5 py-1.5 border-[2.5px] border-danger text-danger rounded-md font-bold text-xl tracking-[0.2em] uppercase z-30 pointer-events-none origin-center"
-                          >
-                            Nope
-                          </motion.div>
-                          <motion.div
-                            style={{ opacity: superLikeOpacity, scale: superLikeScale }}
-                            className="absolute top-1/3 left-1/2 -translate-x-1/2 px-4 py-1.5 border-[2.5px] border-accent-cool text-accent-cool rounded-md font-bold text-lg tracking-[0.18em] uppercase z-30 pointer-events-none whitespace-nowrap"
-                          >
-                            Super
-                          </motion.div>
+                            {isTop ? (
+                              <>
+                                {/* MERGE — diff-green, 12deg, top-right */}
+                                <motion.div
+                                  style={{ opacity: likeOpacity, scale: likeScale }}
+                                  className="absolute top-7 right-5 z-30 rotate-12 px-3.5 py-1.5 border-[2.5px] border-[#3FB950] text-[#3FB950] rounded-md font-mono font-bold text-xl tracking-[0.18em] uppercase pointer-events-none bg-transparent"
+                                >
+                                  Merge
+                                </motion.div>
+                                {/* CLOSE — diff-red, -12deg, top-left */}
+                                <motion.div
+                                  style={{ opacity: nopeOpacity, scale: nopeScale }}
+                                  className="absolute top-7 left-5 z-30 -rotate-12 px-3.5 py-1.5 border-[2.5px] border-[#E5534B] text-[#E5534B] rounded-md font-mono font-bold text-xl tracking-[0.18em] uppercase pointer-events-none bg-transparent"
+                                >
+                                  Close
+                                </motion.div>
+                                <motion.div
+                                  style={{ opacity: superLikeOpacity, scale: superLikeScale }}
+                                  className="absolute top-1/3 left-1/2 z-30 -translate-x-1/2 px-4 py-1.5 border-[2.5px] border-[#E3B341] text-[#E3B341] rounded-md font-mono font-bold text-lg tracking-[0.18em] uppercase pointer-events-none whitespace-nowrap bg-transparent"
+                                >
+                                  Star
+                                </motion.div>
 
-                          <ParallaxPhoto
-                            src={activeProfile.image}
-                            alt={activeProfile.name}
-                            enabled={parallaxEnabled}
-                          />
+                                <ParallaxPhoto
+                                  src={profile.image}
+                                  alt={profile.name}
+                                  enabled={parallaxEnabled}
+                                />
 
-                          <div className="absolute top-3.5 right-3.5 flex items-center gap-1.5 px-2.5 py-1 rounded-full glass z-20">
-                            <span className="relative flex h-1.5 w-1.5">
-                              {!reducedMotion && (
-                                <span className="absolute inline-flex h-full w-full rounded-full bg-accent-cool opacity-60 animate-ping" />
-                              )}
-                              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-cool" />
-                            </span>
-                            <MapPin className="w-3 h-3 text-fg-muted" />
-                            <span className="mono-label !text-fg-muted">{activeProfile.distance}</span>
-                          </div>
-
-                          {/* Multi-stop bottom gradient + frosted info */}
-                          <div
-                            className="absolute inset-x-0 bottom-0 z-20 p-5 pt-16"
-                            style={{
-                              background:
-                                'linear-gradient(to top, rgba(10,13,20,0.96) 0%, rgba(10,13,20,0.78) 35%, rgba(10,13,20,0.35) 65%, transparent 100%)',
-                            }}
-                          >
-                            <div className="glass-raised p-5 rounded-[16px]">
-                              <div className="flex items-baseline gap-2">
-                                <h2 className="text-xl font-semibold tracking-tight text-fg">
-                                  {activeProfile.name}
-                                </h2>
-                                <span className="text-lg text-fg-muted font-normal">
-                                  {activeProfile.age}
-                                </span>
-                              </div>
-                              <p className="mt-2 text-[13px] text-fg-muted leading-relaxed line-clamp-3">
-                                {activeProfile.bio}
-                              </p>
-                              {activeProfile.interests.length > 0 && (
-                                <div className="mt-3.5 flex flex-wrap gap-1.5">
-                                  {activeProfile.interests.slice(0, 5).map((interest, idx) => (
-                                    <span
-                                      key={idx}
-                                      className="px-2 py-0.5 rounded-md text-[11px] font-mono text-fg-muted bg-white/6 border border-white/12"
-                                    >
-                                      {interest}
-                                    </span>
-                                  ))}
+                                <div className="absolute top-3.5 right-3.5 flex items-center gap-1.5 px-2.5 py-1 rounded-full glass z-20">
+                                  <span className="relative flex h-1.5 w-1.5">
+                                    {!reducedMotion && (
+                                      <span className="absolute inline-flex h-full w-full rounded-full bg-accent-brand opacity-60 animate-ping" />
+                                    )}
+                                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-brand" />
+                                  </span>
+                                  <MapPin className="w-3 h-3 text-fg-muted" />
+                                  <span className="mono-label !text-fg-muted">{profile.distance}</span>
                                 </div>
-                              )}
-                            </div>
-                          </div>
-                        </motion.div>
-                      </>
-                    ) : (
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="absolute inset-0 glass rounded-[18px] flex flex-col items-center justify-center p-8 text-center z-0"
-                      >
-                        <div className="w-12 h-12 rounded-full bg-white/6 border border-white/12 flex items-center justify-center mb-5">
-                          <Compass className="w-5 h-5 text-fg-subtle" />
-                        </div>
-                        <h3 className="text-base font-semibold text-fg mb-1.5">You’re all caught up</h3>
-                        <p className="text-[13px] text-fg-muted max-w-[240px] leading-relaxed">
-                          No more profiles to review right now. Check back soon.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={fetchCandidates}
-                          className="btn-ghost mt-6 px-4 py-2 rounded-[12px] text-[13px]"
-                        >
-                          Check again
-                        </button>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+
+                                <div
+                                  className="absolute inset-x-0 bottom-0 z-20 p-5 pt-16"
+                                  style={{
+                                    background:
+                                      'linear-gradient(to top, rgba(10,14,18,0.96) 0%, rgba(10,14,18,0.78) 35%, rgba(10,14,18,0.35) 65%, transparent 100%)',
+                                  }}
+                                >
+                                  <div className="glass-raised p-5 rounded-[16px]">
+                                    <div className="flex items-baseline gap-2">
+                                      <h2 className="text-xl font-semibold tracking-tight text-fg">
+                                        {profile.name}
+                                      </h2>
+                                      <span className="text-lg text-fg-muted font-normal">
+                                        {profile.age}
+                                      </span>
+                                    </div>
+                                    <p className="mt-2 text-[13px] text-fg-muted leading-relaxed line-clamp-3">
+                                      {profile.bio}
+                                    </p>
+                                    {profile.interests.length > 0 && (
+                                      <div className="mt-3.5 flex flex-wrap gap-1.5">
+                                        {profile.interests.slice(0, 5).map((interest, idx) => (
+                                          <span
+                                            key={idx}
+                                            className="px-2 py-0.5 rounded-md text-[11px] font-mono text-fg-muted bg-white/6 border border-white/12"
+                                          >
+                                            {interest}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <img
+                                  src={profile.image}
+                                  alt=""
+                                  draggable={false}
+                                  className="absolute inset-0 w-full h-full object-cover select-none"
+                                />
+                                <div className="absolute inset-0 bg-bg-base/45" />
+                              </>
+                            )}
+                          </motion.div>
+                        );
+                      })}
+                    </AnimatePresence>
+                  )}
                 </div>
 
-                {/* Action hierarchy: secondary 48 · primary 64 · secondary 48 · primary 64 */}
-                <div className="w-full max-w-[380px] flex justify-center items-center gap-5 mt-7">
+                {/* Action hierarchy: primary 64px / secondary 48px */}
+                <div className="w-full max-w-[380px] flex justify-center items-center gap-5 mt-2 relative z-10">
                   <motion.button
                     type="button"
-                    {...actionPress}
+                    whileTap={reducedMotion ? undefined : { scale: 0.9 }}
+                    transition={SPRING_PRESS}
                     onClick={handleRewind}
                     disabled={history.length === 0}
                     title="Undo last swipe"
-                    className="w-12 h-12 rounded-full border border-white/10 glass flex items-center justify-center text-fg-subtle/70 hover:text-fg-muted hover:border-white/20 disabled:opacity-35 disabled:pointer-events-none transition-colors duration-200"
+                    style={{ width: 48, height: 48 }}
+                    className="rounded-full border border-white/10 glass flex items-center justify-center text-fg-subtle opacity-70 hover:opacity-100 hover:text-fg-muted disabled:opacity-35 disabled:pointer-events-none transition-opacity duration-200"
                   >
                     <Undo2 className="w-4 h-4" />
                   </motion.button>
                   <motion.button
                     type="button"
-                    {...actionPress}
+                    whileTap={reducedMotion ? undefined : { scale: 0.9 }}
                     whileHover={
                       reducedMotion
                         ? undefined
                         : {
-                            boxShadow: '0 0 0 4px rgba(232,101,79,0.28)',
+                            scale: 1.05,
+                            boxShadow: '0 0 24px rgba(229, 83, 75, 0.55)',
                           }
                     }
+                    transition={SPRING_PRESS}
                     onClick={() => activeProfile && handlePass(activeProfile.id)}
                     disabled={!activeProfile}
-                    title="Pass"
-                    className="w-16 h-16 rounded-full border border-danger/40 glass flex items-center justify-center text-danger hover:bg-danger/10 disabled:opacity-35 disabled:pointer-events-none transition-colors duration-200"
+                    title="Close"
+                    style={{ width: 64, height: 64 }}
+                    className="rounded-full border border-[#E5534B]/50 glass flex items-center justify-center text-[#E5534B] hover:bg-[#E5534B]/10 disabled:opacity-35 disabled:pointer-events-none"
                   >
-                    <X className="w-6 h-6" strokeWidth={2.25} />
+                    <CircleSlash className="w-6 h-6" strokeWidth={2.25} />
                   </motion.button>
                   <motion.button
                     type="button"
-                    {...actionPress}
+                    whileTap={reducedMotion ? undefined : { scale: 0.9 }}
+                    transition={SPRING_PRESS}
                     onClick={() => activeProfile && handleSuperLike(activeProfile.id)}
                     disabled={!activeProfile}
-                    title="Super like"
-                    className="w-12 h-12 rounded-full border border-white/10 glass flex items-center justify-center text-accent-cool/55 hover:text-accent-cool hover:border-accent-cool/35 hover:bg-accent-cool/10 disabled:opacity-35 disabled:pointer-events-none transition-colors duration-200"
+                    title="Star"
+                    style={{ width: 48, height: 48 }}
+                    className="rounded-full border border-white/10 glass flex items-center justify-center text-[#E3B341] opacity-70 hover:opacity-100 hover:border-[#E3B341]/40 hover:bg-[#E3B341]/10 disabled:opacity-35 disabled:pointer-events-none transition-opacity duration-200"
                   >
                     <Star className="w-4 h-4" />
                   </motion.button>
                   <motion.button
                     type="button"
-                    {...actionPress}
+                    whileTap={reducedMotion ? undefined : { scale: 0.9 }}
                     whileHover={
                       reducedMotion
                         ? undefined
                         : {
-                            boxShadow: '0 0 0 4px rgba(232,166,89,0.32)',
+                            scale: 1.05,
+                            boxShadow: '0 0 24px rgba(63, 185, 80, 0.55)',
                           }
                     }
+                    transition={SPRING_PRESS}
                     onClick={() => activeProfile && handleLike(activeProfile.id)}
                     disabled={!activeProfile}
-                    title="Like"
-                    className="w-16 h-16 rounded-full border border-accent-warm/45 glass flex items-center justify-center text-accent-warm hover:bg-accent-warm/10 disabled:opacity-35 disabled:pointer-events-none transition-colors duration-200"
+                    title="Merge"
+                    style={{ width: 64, height: 64 }}
+                    className="rounded-full border border-[#3FB950]/50 glass flex items-center justify-center text-[#3FB950] hover:bg-[#3FB950]/10 disabled:opacity-35 disabled:pointer-events-none"
                   >
-                    <Heart className="w-6 h-6 fill-current" />
+                    <GitMerge className="w-6 h-6" />
                   </motion.button>
                 </div>
               </div>
@@ -1273,38 +1368,40 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
             {/* ---- BROWSE (Profile Matcher) ---- */}
             {discoverView === 'browse' && (
               <LayoutGroup>
-                <div className="w-full max-w-[720px]">
+                <div className="w-full max-w-[960px]">
                   <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                    {allInterestChips.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {allInterestChips.map((chip) => {
-                          const on = browseFilters.includes(chip);
-                          return (
-                            <motion.button
-                              key={chip}
-                              type="button"
-                              onClick={() => toggleFilter(chip)}
-                              layout
-                              animate={{ scale: on ? 1.03 : 1 }}
-                              transition={
-                                reducedMotion
-                                  ? { duration: 0 }
-                                  : { type: 'spring', stiffness: 480, damping: 16 }
-                              }
-                              className={`px-3 py-1.5 rounded-full text-[12px] font-mono border transition-colors duration-200 ${
-                                on
-                                  ? 'bg-accent-warm border-accent-warm text-bg-base'
-                                  : 'bg-white/5 border-white/12 text-fg-muted hover:border-white/20'
-                              }`}
-                            >
-                              {chip}
-                            </motion.button>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div />
-                    )}
+                    <div className="flex flex-wrap gap-1.5 min-w-0 flex-1">
+                      {allInterestChips.map((chip) => {
+                        const on = browseFilters.includes(chip);
+                        const tone = techChipTone(chip);
+                        return (
+                          <motion.button
+                            key={chip}
+                            type="button"
+                            onClick={() => toggleFilter(chip)}
+                            aria-pressed={on}
+                            layout
+                            animate={{ scale: on ? 1.03 : 1 }}
+                            transition={
+                              reducedMotion
+                                ? { duration: 0 }
+                                : { type: 'spring', stiffness: 480, damping: 16 }
+                            }
+                            className={`inline-flex items-center rounded-md px-2.5 py-1 text-[12px] font-mono border transition-[box-shadow,opacity] duration-200 ${
+                              on ? 'ring-1 ring-offset-0' : 'opacity-85 hover:opacity-100'
+                            }`}
+                            style={{
+                              background: tone.bg,
+                              borderColor: on ? tone.text : tone.border,
+                              color: tone.text,
+                              boxShadow: on ? `0 0 0 1px ${tone.text}` : undefined,
+                            }}
+                          >
+                            {chip}
+                          </motion.button>
+                        );
+                      })}
+                    </div>
 
                     <div className="flex items-center gap-1.5 glass p-0.5 rounded-xl flex-shrink-0">
                       <ArrowUpDown className="w-3 h-3 text-fg-subtle ml-2" />
@@ -1340,51 +1437,58 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                     </div>
                   </div>
 
-                  {loadingCandidates ? (
+                  {loadingCandidates && profiles.length === 0 ? (
                     <RequestSkeleton />
+                  ) : candidatesError ? (
+                    <div className="glass rounded-[18px] p-12 text-center">
+                      <p className="text-sm text-fg-muted">{candidatesError}</p>
+                      <button
+                        type="button"
+                        onClick={() => fetchCandidates()}
+                        className="btn-ghost mt-4 px-4 py-2 rounded-[12px] text-[13px]"
+                      >
+                        Try again
+                      </button>
+                    </div>
                   ) : filteredBrowse.length === 0 ? (
                     <div className="glass rounded-[18px] p-12 text-center">
                       <p className="text-sm text-fg-muted">No candidates match these filters.</p>
-                      <button
-                        type="button"
-                        onClick={() => setBrowseFilters([])}
-                        className="btn-ghost mt-4 px-4 py-2 rounded-[12px] text-[13px]"
-                      >
-                        Clear filters
-                      </button>
+                      {browseFilters.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setBrowseFilters([])}
+                          className="btn-ghost mt-4 px-4 py-2 rounded-[12px] text-[13px]"
+                        >
+                          Clear filters
+                        </button>
+                      )}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 auto-rows-[minmax(148px,auto)]">
+                    /* One unified grid — featured = index 0 only; span via CSS classes */
+                    <div className="browse-grid">
                       {filteredBrowse.map((p, idx) => {
-                        const score = scoreCompatibility(p, myProfile);
-                        const featured = score >= 80;
-                        const elevated = score >= 65 && score < 80;
-                        const spanClass = featured
-                          ? 'col-span-2 sm:col-span-3 row-span-2'
-                          : elevated
-                            ? 'col-span-2 sm:col-span-3'
-                            : 'col-span-1 sm:col-span-2';
+                        const score = browseScore(p);
+                        const isFeatured = idx === 0;
+                        const layoutSpring = reducedMotion
+                          ? { duration: 0 }
+                          : { type: 'spring' as const, stiffness: 300, damping: 30, mass: 0.8 };
 
                         return (
                           <motion.div
                             key={p.id}
-                            initial={reducedMotion ? false : { opacity: 0, y: 14 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{
-                              duration: reducedMotion ? 0.15 : 0.28,
-                              delay: reducedMotion ? 0 : Math.min(idx, 16) * 0.03,
-                              ease: EASE,
-                            }}
+                            layout
+                            layoutId={`browse-card-${p.id}`}
+                            transition={layoutSpring}
                             whileHover={
                               reducedMotion
                                 ? undefined
                                 : {
                                     y: -4,
-                                    boxShadow: '0 16px 40px -18px rgba(0,0,0,0.55)',
+                                    boxShadow: '0 18px 40px -16px rgba(0,0,0,0.6)',
                                   }
                             }
-                            className={`group relative glass rounded-[18px] overflow-hidden text-left ${spanClass} ${
-                              featured ? 'min-h-[300px]' : elevated ? 'min-h-[168px]' : ''
+                            className={`group relative glass rounded-[18px] overflow-hidden text-left h-full ${
+                              isFeatured ? 'card-featured' : 'card-standard'
                             }`}
                           >
                             <button
@@ -1394,8 +1498,15 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                               aria-label={`Open ${p.name}`}
                             />
 
-                            {featured ? (
-                              <div className="relative h-full flex flex-col pointer-events-none">
+                            {isFeatured ? (
+                              <div className="relative h-full min-h-[inherit] flex flex-col pointer-events-none">
+                                <motion.div
+                                  layoutId="browse-featured-badge"
+                                  className="absolute top-3 left-3 z-20 px-2 py-0.5 rounded-md text-[10px] font-mono tracking-wide bg-accent-brand/20 text-accent-brand border border-accent-brand/35"
+                                  transition={layoutSpring}
+                                >
+                                  Top match
+                                </motion.div>
                                 <div className="relative flex-1 min-h-[160px] overflow-hidden">
                                   <img
                                     src={p.image}
@@ -1412,96 +1523,79 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                                   <div className="absolute top-3 right-3 z-10 pointer-events-auto">
                                     <CompatibilityRing
                                       score={score}
-                                      size={48}
+                                      size={52}
                                       layoutId={`compat-${p.id}`}
                                     />
                                   </div>
                                 </div>
-                                <div className="relative p-4 -mt-10 z-10">
-                                  <p className="text-[15px] font-semibold text-fg truncate">
+                                <div className="relative p-4 sm:p-5 -mt-10 z-10">
+                                  <p className="browse-card-name text-[16px] font-semibold text-fg">
                                     {p.name}{' '}
                                     <span className="text-fg-muted font-normal">{p.age}</span>
                                   </p>
                                   <p className="mono-label mt-0.5">{p.distance}</p>
-                                  <p className="text-[12px] text-fg-muted mt-2 line-clamp-2 leading-relaxed">
-                                    {p.bio}
+                                  <p className="browse-card-bio mt-2 !text-[13px]">
+                                    {p.bio || 'This developer hasn’t written a bio yet.'}
                                   </p>
-                                  {p.interests.length > 0 && (
-                                    <div className="mt-2.5 flex flex-wrap gap-1">
-                                      {p.interests.slice(0, 3).map((i) => (
-                                        <span
-                                          key={i}
-                                          className="px-1.5 py-0.5 rounded text-[10px] font-mono text-fg-muted bg-white/6 border border-white/10"
-                                        >
-                                          {i}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
                                 </div>
                               </div>
                             ) : (
-                              <div className="relative p-3.5 h-full flex gap-3 pointer-events-none">
-                                <div
-                                  className={`rounded-[14px] overflow-hidden border border-white/12 flex-shrink-0 ${
-                                    elevated ? 'w-20 h-20' : 'w-14 h-14'
-                                  }`}
-                                >
+                              <div className="relative h-full min-h-[140px] flex gap-3 p-3.5 pointer-events-none">
+                                <div className="w-14 h-14 rounded-[14px] overflow-hidden border border-white/12 flex-shrink-0">
                                   <img
                                     src={p.image}
                                     alt={p.name}
                                     className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
                                   />
                                 </div>
-                                <div className="flex-1 min-w-0">
+                                <div className="flex-1 min-w-0 flex flex-col">
                                   <div className="flex items-start justify-between gap-2">
-                                    <div className="min-w-0">
-                                      <p className="text-[14px] font-semibold text-fg truncate">
+                                    <div className="min-w-0 flex-1">
+                                      <p className="browse-card-name text-[14px] font-semibold text-fg">
                                         {p.name}{' '}
                                         <span className="text-fg-muted font-normal">{p.age}</span>
                                       </p>
                                       <p className="mono-label mt-0.5">{p.distance}</p>
                                     </div>
-                                    <div className="pointer-events-auto">
+                                    <div className="pointer-events-auto flex-shrink-0">
                                       <CompatibilityRing
                                         score={score}
-                                        size={elevated ? 44 : 40}
+                                        size={40}
                                         layoutId={`compat-${p.id}`}
                                       />
                                     </div>
                                   </div>
-                                  <p className="text-[12px] text-fg-muted mt-2 line-clamp-2 leading-relaxed">
-                                    {p.bio}
+                                  <p className="browse-card-bio mt-1.5">
+                                    {p.bio || 'This developer hasn’t written a bio yet.'}
                                   </p>
                                 </div>
                               </div>
                             )}
 
-                            {/* Quick-action overlay */}
                             <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center gap-3 pb-3 pt-8 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-[opacity,transform] duration-200 pointer-events-none group-hover:pointer-events-auto bg-gradient-to-t from-bg-base/90 via-bg-base/50 to-transparent">
                               <motion.button
                                 type="button"
-                                {...actionPress}
+                                whileTap={reducedMotion ? undefined : { scale: 0.9 }}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleBrowseAction(p.id, 'PASS');
                                 }}
-                                title="Pass"
-                                className="w-10 h-10 rounded-full glass border border-danger/35 text-danger flex items-center justify-center hover:bg-danger/10"
+                                title="Close"
+                                className="w-10 h-10 rounded-full glass border border-[#E5534B]/40 text-[#E5534B] flex items-center justify-center"
                               >
-                                <X className="w-4 h-4" />
+                                <CircleSlash className="w-4 h-4" />
                               </motion.button>
                               <motion.button
                                 type="button"
-                                {...actionPress}
+                                whileTap={reducedMotion ? undefined : { scale: 0.9 }}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleBrowseAction(p.id, 'LIKE');
                                 }}
-                                title="Like"
-                                className="w-10 h-10 rounded-full glass border border-accent-warm/40 text-accent-warm flex items-center justify-center hover:bg-accent-warm/10"
+                                title="Merge"
+                                className="w-10 h-10 rounded-full glass border border-[#3FB950]/40 text-[#3FB950] flex items-center justify-center"
                               >
-                                <Heart className="w-4 h-4 fill-current" />
+                                <GitMerge className="w-4 h-4" />
                               </motion.button>
                             </div>
                           </motion.div>
@@ -1543,8 +1637,8 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                               </h3>
                               <p className="mono-label mt-0.5">{selectedBrowse.distance}</p>
                             </div>
-                            <CompatibilityRing
-                              score={scoreCompatibility(selectedBrowse, myProfile)}
+                              <CompatibilityRing
+                              score={browseScore(selectedBrowse)}
                               size={52}
                               layoutId={`compat-${selectedBrowse.id}`}
                             />
@@ -1570,7 +1664,7 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                               }}
                               className="btn-primary flex-1 py-2.5 rounded-[12px] text-sm"
                             >
-                              Like
+                              Merge
                             </button>
                             <button
                               type="button"
@@ -1612,7 +1706,7 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                         transition={{ duration: 0.22, ease: EASE }}
                         className="glass-raised rounded-[18px] p-8 text-center"
                       >
-                        <p className="mono-label mb-3">mutual like</p>
+                        <p className="mono-label mb-3">merged</p>
                         <h1 className="display-italic text-[28px] text-gradient-brand mb-2">
                           It’s a match
                         </h1>
@@ -1651,9 +1745,9 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
 
         {/* ========== CHAT ========== */}
         {activeTab === 'matches' && (
-          <div className="flex-1 flex md:h-screen">
+          <div className="flex-1 flex min-h-0">
             <div
-              className={`w-full md:w-[320px] md:border-r border-white/12 flex-col bg-bg-base/40 ${
+              className={`w-full md:w-[320px] md:border-r border-white/12 flex-col min-h-0 bg-bg-base/40 ${
                 selectedMatch ? 'hidden md:flex' : 'flex'
               }`}
             >
@@ -1666,7 +1760,7 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                 {loadingMatches ? (
                   <Spinner label="loading matches" />
                 ) : matches.length > 0 ? (
-                  <LayoutGroup id="match-list">
+                  <LayoutGroup id="active-match-list">
                     {matches.map((match) => {
                       const selected = selectedMatch?.id === match.id;
                       const online = isMatchOnline(match.id);
@@ -1682,15 +1776,15 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                             stickToBottom.current = true;
                             setShowNewMsgPill(false);
                           }}
-                          className={`group relative w-full flex items-center gap-3 p-2.5 pl-3.5 rounded-[12px] text-left overflow-hidden transition-colors duration-150 ${
+                          className={`group relative w-full flex items-center gap-3 p-2.5 pl-3.5 rounded-[12px] text-left transition-colors duration-150 ${
                             selected ? 'bg-white/[0.09]' : 'hover:bg-white/[0.06]'
                           }`}
                         >
                           {selected && (
-                            <motion.span
-                              layoutId="match-selection-accent"
-                              className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-accent-warm"
-                              transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                            <motion.div
+                              layoutId="active-match-indicator"
+                              className="absolute left-0 top-2 bottom-2 w-[4px] rounded-r-full bg-accent-brand"
+                              transition={{ type: 'spring', stiffness: 380, damping: 32 }}
                             />
                           )}
                           <motion.div
@@ -1699,16 +1793,13 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                             transition={{ duration: 0.15, ease: EASE }}
                           >
                             <div className="relative flex-shrink-0">
-                              <motion.div
-                                layoutId={`avatar-${match.id}`}
-                                className="w-10 h-10 rounded-full overflow-hidden border border-white/12"
-                              >
+                              <div className="w-10 h-10 rounded-full overflow-hidden border border-white/12">
                                 <img
                                   src={match.avatar}
                                   alt={match.name}
                                   className="w-full h-full object-cover"
                                 />
-                              </motion.div>
+                              </div>
                               {online && <OnlinePresence reducedMotion={reducedMotion} />}
                             </div>
                             <div className="flex-1 min-w-0">
@@ -1722,10 +1813,10 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                                 >
                                   {match.name}
                                   {match.unread && (
-                                    <span className="w-1.5 h-1.5 rounded-full bg-accent-warm flex-shrink-0" />
+                                    <span className="w-1.5 h-1.5 rounded-full bg-accent-brand flex-shrink-0" />
                                   )}
                                   {match.type === 'project' && (
-                                    <span className="px-1.5 py-px rounded bg-accent-cool/10 text-accent-cool text-[10px] font-mono flex-shrink-0 font-normal">
+                                    <span className="px-1.5 py-px rounded bg-white/8 text-fg-muted text-[10px] font-mono flex-shrink-0 font-normal">
                                       project
                                     </span>
                                   )}
@@ -1754,7 +1845,7 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
               </div>
             </div>
 
-            <div className={`flex-1 flex-col bg-bg-base/20 ${selectedMatch ? 'flex' : 'hidden md:flex'}`}>
+            <div className={`flex-1 flex-col min-h-0 bg-bg-base/20 ${selectedMatch ? 'flex' : 'hidden md:flex'}`}>
               {selectedMatch ? (
                 <>
                   <div className="h-14 px-4 md:px-5 border-b border-white/12 flex items-center justify-between flex-shrink-0 glass">
@@ -1768,29 +1859,26 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                         <ChevronLeft className="w-4 h-4" />
                       </button>
                       <div className="relative flex-shrink-0">
-                        <motion.div
-                          layoutId={`avatar-${selectedMatch.id}`}
-                          className="w-8 h-8 rounded-full overflow-hidden border border-white/12"
-                        >
+                        <div className="w-8 h-8 rounded-full overflow-hidden border border-white/12">
                           <img
                             src={selectedMatch.avatar}
                             alt={selectedMatch.name}
                             className="w-full h-full object-cover"
                           />
-                        </motion.div>
+                        </div>
                         {isMatchOnline(selectedMatch.id) && (
-                          <OnlinePresence reducedMotion={reducedMotion} size="sm" />
+                          <OnlinePresence reducedMotion={reducedMotion} size="sm" tone="human" />
                         )}
                       </div>
                       <div className="min-w-0">
-                        <h3 className="text-[13px] font-medium text-fg truncate leading-tight flex items-center gap-1.5">
+                        <h3 className="display text-[15px] text-fg truncate leading-tight flex items-center gap-1.5">
                           {selectedMatch.name}
                           {isMatchOnline(selectedMatch.id) && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-accent-cool" title="Online" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-fg-muted" title="Online" />
                           )}
                         </h3>
-                        {selectedMatch.type === 'project' && (
-                          <p className="mono-label truncate leading-tight mt-0.5">
+                        {selectedMatch.type === 'project' && selectedMatch.projectTitle && (
+                          <p className="text-[11px] text-fg-subtle truncate leading-tight mt-0.5">
                             {selectedMatch.projectTitle}
                           </p>
                         )}
@@ -1810,7 +1898,7 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                     <div
                       ref={chatScrollRef}
                       onScroll={onChatScroll}
-                      className="flex-1 overflow-y-auto px-4 md:px-6 py-5 space-y-2.5"
+                      className="flex-1 overflow-y-auto px-4 md:px-6 py-5 flex flex-col min-h-0"
                     >
                       {currentMessages.length === 0 ? (
                         <MatchEmptyChat
@@ -1824,121 +1912,128 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                           }}
                         />
                       ) : (
-                        <>
+                        <div className="space-y-2.5">
                           <DateSeparator label="Today" />
-                          {currentMessages.map((msg, idx) => {
-                            const isSystemBrief = msg.text.startsWith('[SYSTEM: PROJECT BRIEF]');
-                            const enter = reducedMotion
-                              ? false
-                              : { opacity: 0, y: 8, scale: 0.95 };
-                            const stagger = {
-                              duration: reducedMotion ? 0 : 0.28,
-                              delay: reducedMotion ? 0 : Math.min(idx, 8) * 0.06,
-                              ease: EASE,
-                            };
+                          <AnimatePresence initial={!reducedMotion}>
+                            {currentMessages.map((msg, idx) => {
+                              const isSystemBrief = msg.text.startsWith('[SYSTEM: PROJECT BRIEF]');
+                              const enter = reducedMotion
+                                ? false
+                                : { opacity: 0, y: 8, scale: 0.95 };
+                              const stagger = {
+                                duration: reducedMotion ? 0 : 0.28,
+                                delay: reducedMotion ? 0 : Math.min(idx, 8) * 0.06,
+                                ease: EASE,
+                              };
 
-                            if (isSystemBrief) {
-                              const titleLine = msg.text.split('\n')[1] || '';
-                              const stackLine = msg.text.split('\n')[2] || '';
-                              const descLines = msg.text.split('\n').slice(4).join('\n') || '';
+                              if (isSystemBrief) {
+                                const titleLine = msg.text.split('\n')[1] || '';
+                                const stackLine = msg.text.split('\n')[2] || '';
+                                const descLines = msg.text.split('\n').slice(4).join('\n') || '';
+                                return (
+                                  <motion.div
+                                    key={`${selectedMatch.id}-sys-${idx}`}
+                                    initial={enter}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.98 }}
+                                    transition={stagger}
+                                    className="w-full flex justify-center py-2"
+                                  >
+                                    <div className="w-full max-w-md glass rounded-[16px] p-4 space-y-2.5">
+                                      <div className="flex items-center justify-between border-b border-white/12 pb-2">
+                                        <span className="text-[11px] text-fg-subtle">Project brief</span>
+                                        <span className="text-[11px] text-fg-subtle">{msg.time}</span>
+                                      </div>
+                                      <h4 className="text-sm font-semibold text-fg">
+                                        {titleLine.replace('Project: ', '')}
+                                      </h4>
+                                      <p className="text-[12px] text-fg-muted">{stackLine.replace('Stack: ', '')}</p>
+                                      <p className="text-[13px] text-fg-muted leading-relaxed whitespace-pre-wrap">
+                                        {descLines.replace('Description: ', '')}
+                                      </p>
+                                    </div>
+                                  </motion.div>
+                                );
+                              }
+
+                              const mine = msg.sender === 'me';
                               return (
                                 <motion.div
-                                  key={`${selectedMatch.id}-sys-${idx}`}
+                                  key={`${selectedMatch.id}-msg-${idx}`}
                                   initial={enter}
                                   animate={{ opacity: 1, y: 0, scale: 1 }}
+                                  exit={{ opacity: 0, scale: 0.98 }}
                                   transition={stagger}
-                                  className="w-full flex justify-center py-2"
+                                  className={`group/bubble flex ${mine ? 'justify-end' : 'justify-start'}`}
                                 >
-                                  <div className="w-full max-w-md glass rounded-[16px] p-4 space-y-2.5">
-                                    <div className="flex items-center justify-between border-b border-white/12 pb-2">
-                                      <span className="mono-label !text-accent-warm">project brief</span>
-                                      <span className="mono-label">{msg.time}</span>
-                                    </div>
-                                    <h4 className="text-sm font-semibold text-fg">
-                                      {titleLine.replace('Project: ', '')}
-                                    </h4>
-                                    <p className="mono-label">{stackLine.replace('Stack: ', '')}</p>
-                                    <p className="text-[13px] text-fg-muted leading-relaxed whitespace-pre-wrap">
-                                      {descLines.replace('Description: ', '')}
-                                    </p>
+                                  <div
+                                    className={`max-w-[75%] px-3.5 py-2.5 text-sm leading-relaxed backdrop-blur-md border ${
+                                      mine
+                                        ? 'bg-white/[0.1] border-white/16 text-fg rounded-[20px] rounded-br-[4px]'
+                                        : 'bg-white/[0.05] border-white/10 text-fg rounded-[20px] rounded-bl-[4px]'
+                                    }`}
+                                    style={
+                                      mine
+                                        ? { borderRadius: '20px 20px 4px 20px' }
+                                        : { borderRadius: '20px 20px 20px 4px' }
+                                    }
+                                  >
+                                    <p className="whitespace-pre-wrap">{msg.text}</p>
+                                    <span
+                                      className={`flex items-center justify-end gap-1 mt-1 text-[10px] text-fg-subtle transition-opacity duration-200 ${
+                                        reducedMotion
+                                          ? 'opacity-70'
+                                          : 'opacity-0 group-hover/bubble:opacity-100'
+                                      }`}
+                                    >
+                                      {msg.time}
+                                      {mine && (
+                                        <span className="inline-flex">
+                                          {msg.read ? (
+                                            <CheckCheck className="w-3 h-3" />
+                                          ) : (
+                                            <Check className="w-3 h-3" />
+                                          )}
+                                        </span>
+                                      )}
+                                    </span>
                                   </div>
                                 </motion.div>
                               );
-                            }
+                            })}
+                          </AnimatePresence>
 
-                            const mine = msg.sender === 'me';
-                            return (
-                              <motion.div
-                                key={`${selectedMatch.id}-msg-${idx}`}
-                                initial={enter}
-                                animate={{ opacity: 1, y: 0, scale: 1 }}
-                                transition={stagger}
-                                className={`group/bubble flex ${mine ? 'justify-end' : 'justify-start'}`}
-                              >
-                                <div
-                                  className={`max-w-[75%] px-3.5 py-2.5 text-sm leading-relaxed backdrop-blur-md border ${
-                                    mine
-                                      ? 'bg-accent-warm/18 border-accent-warm/30 text-fg rounded-[20px] rounded-br-[4px]'
-                                      : 'bg-white/[0.06] border-white/12 text-fg rounded-[20px] rounded-bl-[4px]'
-                                  }`}
-                                >
-                                  <p className="whitespace-pre-wrap">{msg.text}</p>
-                                  <span
-                                    className={`flex items-center justify-end gap-1 mt-1 text-[10px] font-mono text-fg-subtle transition-opacity duration-200 ${
+                          {isTyping && (
+                            <motion.div
+                              className="flex justify-start"
+                              initial={reducedMotion ? false : { opacity: 0, y: 6, scale: 0.95 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              transition={{ duration: 0.22, ease: EASE }}
+                            >
+                              <div className="px-3 py-2.5 flex gap-1.5 items-center rounded-full bg-white/[0.06] border border-white/12 backdrop-blur-md">
+                                {[0, 1, 2].map((i) => (
+                                  <motion.span
+                                    key={i}
+                                    className="w-1.5 h-1.5 rounded-full bg-fg-muted"
+                                    animate={
+                                      reducedMotion ? { opacity: 0.55 } : { y: [0, -3.5, 0] }
+                                    }
+                                    transition={
                                       reducedMotion
-                                        ? 'opacity-70'
-                                        : 'opacity-0 group-hover/bubble:opacity-100'
-                                    }`}
-                                  >
-                                    {msg.time}
-                                    {mine && (
-                                      <span className="inline-flex">
-                                        {msg.read ? (
-                                          <CheckCheck className="w-3 h-3" />
-                                        ) : (
-                                          <Check className="w-3 h-3" />
-                                        )}
-                                      </span>
-                                    )}
-                                  </span>
-                                </div>
-                              </motion.div>
-                            );
-                          })}
-                        </>
-                      )}
-
-                      {isTyping && (
-                        <motion.div
-                          className="flex justify-start"
-                          initial={reducedMotion ? false : { opacity: 0, y: 6, scale: 0.95 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          transition={{ duration: 0.22, ease: EASE }}
-                        >
-                          <div className="px-3 py-2.5 flex gap-1.5 items-center rounded-full bg-white/[0.06] border border-white/12 backdrop-blur-md">
-                            {[0, 1, 2].map((i) => (
-                              <motion.span
-                                key={i}
-                                className="w-1.5 h-1.5 rounded-full bg-fg-muted"
-                                animate={
-                                  reducedMotion
-                                    ? { opacity: 0.55 }
-                                    : { y: [0, -3.5, 0] }
-                                }
-                                transition={
-                                  reducedMotion
-                                    ? { duration: 0 }
-                                    : {
-                                        duration: 0.95,
-                                        repeat: Infinity,
-                                        delay: i * 0.1,
-                                        ease: 'easeInOut',
-                                      }
-                                }
-                              />
-                            ))}
-                          </div>
-                        </motion.div>
+                                        ? { duration: 0 }
+                                        : {
+                                            duration: 0.95,
+                                            repeat: Infinity,
+                                            delay: i * 0.1,
+                                            ease: 'easeInOut',
+                                          }
+                                    }
+                                  />
+                                ))}
+                              </div>
+                            </motion.div>
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -1953,7 +2048,7 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                           onClick={scrollChatToBottom}
                           className="absolute bottom-3 left-1/2 -translate-x-1/2 glass-raised px-3 py-1.5 rounded-full text-[12px] font-medium text-fg flex items-center gap-1.5 shadow-none"
                         >
-                          <ArrowDown className="w-3 h-3 text-accent-warm" />
+                          <ArrowDown className="w-3 h-3 text-fg-muted" />
                           New message
                         </motion.button>
                       )}
@@ -1966,7 +2061,7 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                   >
                     <div
                       className={`field flex items-center gap-2 pl-3.5 pr-1.5 py-1.5 transition-[box-shadow,border-color] duration-200 ${
-                        chatFocused ? '!border-accent-warm/50 !shadow-[0_0_0_3px_rgba(232,166,89,0.14)]' : ''
+                        chatFocused ? '!border-white/25 !shadow-[0_0_0_3px_rgba(230,237,243,0.06)]' : ''
                       }`}
                     >
                       <input
@@ -1987,8 +2082,8 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                           chatInput.trim()
                             ? {
                                 scale: 1,
-                                backgroundColor: 'rgba(232, 166, 89, 1)',
-                                color: 'rgba(10, 13, 20, 1)',
+                                backgroundColor: 'rgba(185, 144, 255, 1)',
+                                color: 'rgba(10, 14, 18, 1)',
                               }
                             : {
                                 scale: 0.92,
@@ -2005,15 +2100,18 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
                   </form>
                 </>
               ) : (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-                  <div className="w-12 h-12 rounded-full bg-white/6 border border-white/12 flex items-center justify-center mb-4 text-fg-subtle">
-                    <MessageCircle className="w-5 h-5" />
-                  </div>
-                  <h3 className="text-sm font-semibold text-fg">Your messages</h3>
-                  <p className="text-[13px] text-fg-muted mt-1.5 max-w-[240px] leading-relaxed">
-                    Select a match to start the conversation.
-                  </p>
-                </div>
+                <NoConversationOpen
+                  matches={matches}
+                  reducedMotion={reducedMotion}
+                  onSelect={(match) => {
+                    setSelectedMatch(match);
+                    setMatches(
+                      matches.map((m) => (m.id === match.id ? { ...m, unread: false } : m))
+                    );
+                    stickToBottom.current = true;
+                    setShowNewMsgPill(false);
+                  }}
+                />
               )}
             </div>
           </div>
@@ -2044,10 +2142,52 @@ export const DiscoveryPage: React.FC<DiscoveryPageProps> = ({ onLogout }) => {
             setProjectStatuses={setProjectStatuses}
             onRefreshProjects={fetchProjects}
             onOfferHelp={handleProjectOfferHelp}
-            onViewOwnProfile={() => setActiveTab('profile')}
+            onViewOwnProfile={() => goToTab('profile')}
           />
         )}
       </main>
+
+      <nav className="mobile-tab-bar" aria-label="Primary">
+        {navItems.map(({ key, label, icon: Icon }) => {
+          const active = activeTab === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => goToTab(key)}
+              className={`relative flex flex-col items-center justify-center gap-1 px-3 py-1 text-[10px] font-medium transition-colors duration-200 ${
+                active ? 'text-accent-brand' : 'text-fg-subtle'
+              }`}
+            >
+              <Icon className="w-5 h-5" strokeWidth={active ? 2.25 : 1.75} />
+              <span className="font-mono tracking-wide">{label}</span>
+              {key === 'matches' && matches.length > 0 && (
+                <span className="absolute -top-0.5 right-1 nav-count-chip !min-w-[1rem] !h-4 !text-[9px]">
+                  {matches.length}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        onNavigateTab={goToTab}
+        onOpenMatch={(m) => {
+          const full = matches.find((x) => x.id === m.id);
+          if (full) setSelectedMatch(full);
+          goToTab('matches');
+        }}
+        onOpenProject={(p) => {
+          window.location.hash = projectHelpHash('detail', p.id);
+          goToTab('projectHelp');
+        }}
+        matches={matches.map((m) => ({ id: m.id, name: m.name }))}
+        projects={projects.map((p) => ({ id: p.id, title: p.title }))}
+        reducedMotion={reducedMotion}
+      />
     </div>
   );
 };

@@ -1,8 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { motion, AnimatePresence, animate, LayoutGroup } from 'framer-motion';
+import {
+  motion,
+  AnimatePresence,
+  animate,
+  LayoutGroup,
+  useMotionValue,
+  useMotionValueEvent,
+} from 'framer-motion';
 import {
   User,
-  Heart,
+  GitMerge,
   HandHelping,
   Code2,
   Plus,
@@ -13,23 +20,16 @@ import {
   MapPin,
   Search,
   Users,
-  Coffee,
-  Sparkles,
-  Braces,
-  Database,
-  Terminal,
-  Cpu,
-  Globe,
-  Layers,
   Pencil,
-  type LucideIcon,
 } from 'lucide-react';
 import { FloatingField } from './FloatingField';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 import type { RequestStatus } from './RequestStepper';
+import { languageTone } from '../lib/languageColors';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
-const SPRING_PILL = { type: 'spring' as const, stiffness: 380, damping: 32 };
+const EASE_OUT = [0.16, 1, 0.3, 1] as const;
+const SPRING_PILL = { type: 'spring' as const, stiffness: 420, damping: 34, mass: 0.7 };
 const MAX_RADIUS = 50;
 
 type ProfileMatch = {
@@ -59,40 +59,37 @@ const LOOKING_FOR_PRESETS = [
   'Pair programmer',
 ] as const;
 
-const INTEREST_ICON_MAP: { match: RegExp; icon: LucideIcon }[] = [
-  { match: /react|next|vue|angular|svelte/i, icon: Layers },
-  { match: /python|django|flask|fastapi/i, icon: Terminal },
-  { match: /node|typescript|javascript|js|ts/i, icon: Braces },
-  { match: /sql|postgres|mongo|redis|database|db/i, icon: Database },
-  { match: /go|rust|java|c\+\+|kotlin|swift/i, icon: Cpu },
-  { match: /aws|cloud|docker|k8s|devops/i, icon: Globe },
-  { match: /design|ui|ux|figma/i, icon: Sparkles },
-  { match: /coffee|tea/i, icon: Coffee },
-];
-
-function iconForInterest(label: string): LucideIcon {
-  for (const entry of INTEREST_ICON_MAP) {
-    if (entry.match.test(label)) return entry.icon;
-  }
-  return Code2;
-}
-
 function CountUp({ value, reducedMotion }: { value: number; reducedMotion: boolean }) {
-  const [display, setDisplay] = useState(reducedMotion ? value : 0);
+  const mv = useMotionValue(0);
+  const [display, setDisplay] = useState(0);
+
+  useMotionValueEvent(mv, 'change', (v) => {
+    setDisplay(Math.round(v));
+  });
 
   useEffect(() => {
     if (reducedMotion) {
+      mv.set(value);
       setDisplay(value);
       return;
     }
+
+    // Paint 0 first, then ease out to the final value over ~800ms.
+    mv.set(0);
     setDisplay(0);
-    const controls = animate(0, value, {
-      duration: 0.95,
-      ease: EASE,
-      onUpdate: (v) => setDisplay(Math.round(v)),
+    let controls: ReturnType<typeof animate> | undefined;
+    const raf = requestAnimationFrame(() => {
+      controls = animate(mv, value, {
+        duration: 0.8,
+        ease: EASE_OUT,
+      });
     });
-    return () => controls.stop();
-  }, [value, reducedMotion]);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      controls?.stop();
+    };
+  }, [value, reducedMotion, mv]);
 
   return <span className="tabular-nums">{display}</span>;
 }
@@ -103,6 +100,56 @@ const Spinner: React.FC<{ label: string }> = ({ label }) => (
     <p className="mono-label">{label}</p>
   </div>
 );
+
+/** Dashed empty-state invite — hover: brand border, + scale, subtle tint */
+function AddInvite({
+  label,
+  onClick,
+  className = '',
+}: {
+  label: string;
+  onClick: () => void;
+  className?: string;
+}) {
+  const reducedMotion = usePrefersReducedMotion();
+  return (
+    <motion.button
+      type="button"
+      onClick={onClick}
+      initial="rest"
+      whileHover={reducedMotion ? undefined : 'hover'}
+      whileTap={reducedMotion ? undefined : 'tap'}
+      variants={{
+        rest: {
+          borderColor: 'rgba(255, 255, 255, 0.18)',
+          backgroundColor: 'rgba(185, 144, 255, 0)',
+          color: 'rgba(107, 115, 137, 1)',
+        },
+        hover: {
+          borderColor: 'rgba(185, 144, 255, 0.55)',
+          backgroundColor: 'rgba(185, 144, 255, 0.07)',
+          color: 'rgba(196, 200, 212, 1)',
+        },
+        tap: { scale: 0.995 },
+      }}
+      transition={{ duration: 0.18, ease: EASE }}
+      className={`w-full flex items-center justify-center gap-2 py-6 rounded-[14px] border border-dashed text-[13px] ${className}`}
+    >
+      <motion.span
+        className="inline-flex"
+        variants={{
+          rest: { scale: 1 },
+          hover: { scale: 1.1 },
+          tap: { scale: 1.05 },
+        }}
+        transition={{ type: 'spring', stiffness: 420, damping: 22 }}
+      >
+        <Plus className="w-3.5 h-3.5" />
+      </motion.span>
+      {label}
+    </motion.button>
+  );
+}
 
 function MorphField({
   editing,
@@ -119,27 +166,33 @@ function MorphField({
   return (
     <motion.div
       layout={!reducedMotion}
-      transition={reducedMotion ? { duration: 0 } : { layout: { duration: 0.28, ease: EASE } }}
-      className={className}
+      transition={
+        reducedMotion
+          ? { duration: 0 }
+          : { layout: { duration: 0.32, ease: EASE }, opacity: { duration: 0.22 } }
+      }
+      className={`overflow-hidden ${className}`}
     >
-      <AnimatePresence mode="wait" initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         {editing ? (
           <motion.div
             key="edit"
-            initial={reducedMotion ? false : { opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
-            transition={{ duration: reducedMotion ? 0 : 0.22, ease: EASE }}
+            layout={!reducedMotion}
+            initial={reducedMotion ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+            transition={{ duration: reducedMotion ? 0 : 0.26, ease: EASE }}
           >
             {children}
           </motion.div>
         ) : (
           <motion.div
             key="view"
-            initial={reducedMotion ? false : { opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: reducedMotion ? 0 : 0.18, ease: EASE }}
+            layout={!reducedMotion}
+            initial={reducedMotion ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+            transition={{ duration: reducedMotion ? 0 : 0.26, ease: EASE }}
           >
             {display}
           </motion.div>
@@ -374,7 +427,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
             <div
               className={`relative flex-shrink-0 group ${
                 avatarDragging
-                  ? 'ring-2 ring-accent-warm shadow-[0_0_24px_rgba(232,166,89,0.35)]'
+                  ? 'ring-2 ring-accent-brand shadow-[0_0_24px_rgba(185,144,255,0.35)]'
                   : ''
               } rounded-full transition-[box-shadow,ring] duration-200`}
               onDragEnter={(e) => {
@@ -393,7 +446,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                 if (file) applyAvatarFile(file);
               }}
             >
-              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full p-[3px] bg-gradient-to-br from-accent-warm to-accent-deep">
+              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full p-[3px] bg-gradient-to-br from-accent-brand to-accent-deep">
                 <div className="w-full h-full rounded-full bg-ink-900 overflow-hidden flex items-center justify-center border-2 border-bg-base">
                   {avatarSrc ? (
                     <img
@@ -447,7 +500,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                         startEditing();
                         setProfileTab('overview');
                       }}
-                      className="mt-1.5 inline-flex items-center gap-1.5 text-[12px] text-fg-subtle border border-dashed border-white/18 rounded-full px-2.5 py-0.5 hover:border-accent-warm/40 hover:text-fg-muted transition-colors duration-200"
+                      className="mt-1.5 inline-flex items-center gap-1.5 text-[12px] text-fg-subtle border border-dashed border-white/18 rounded-full px-2.5 py-0.5 hover:border-accent-brand/40 hover:text-fg-muted transition-colors duration-200"
                     >
                       <Plus className="w-3 h-3" />
                       Add a tagline
@@ -500,7 +553,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
         {/* ---- Stats ---- */}
         <div className="grid grid-cols-3 gap-2 sm:gap-3">
           {[
-            { label: 'Matches', value: matchCount, icon: Heart },
+            { label: 'Matches', value: matchCount, icon: GitMerge },
             { label: 'Requests helped', value: helpedCount, icon: HandHelping },
             { label: 'Skills tagged', value: interestCount, icon: Code2 },
           ].map(({ label, value, icon: Icon }) => (
@@ -508,7 +561,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
               key={label}
               className="glass rounded-[16px] px-3 py-3.5 sm:px-4 text-center"
             >
-              <Icon className="w-3.5 h-3.5 text-accent-warm mx-auto mb-1.5 opacity-80" />
+              <Icon className="w-3.5 h-3.5 text-accent-brand mx-auto mb-1.5 opacity-80" />
               <p className="text-xl sm:text-2xl font-semibold tracking-tight text-fg">
                 <CountUp value={value} reducedMotion={reducedMotion} />
               </p>
@@ -520,10 +573,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
         </div>
 
         {/* ---- Tabs ---- */}
-        <LayoutGroup>
+        <LayoutGroup id="profile-tabs">
           <div
             role="tablist"
-            className="glass inline-flex p-1 rounded-full w-full sm:w-auto"
+            className="glass inline-flex p-1 rounded-full w-full sm:w-auto relative"
           >
             {tabs.map(({ key, label }) => {
               const active = profileTab === key;
@@ -540,7 +593,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                 >
                   {active && (
                     <motion.span
-                      layoutId={reducedMotion ? undefined : 'profile-tab-pill'}
+                      layoutId="profile-tab-pill"
                       className="absolute inset-0 rounded-full bg-white/10"
                       transition={reducedMotion ? { duration: 0 } : SPRING_PILL}
                     />
@@ -553,33 +606,32 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
         </LayoutGroup>
 
         {/* ---- Tab panels ---- */}
-        <AnimatePresence mode="wait">
+        <div className="relative min-h-[200px]">
+        <AnimatePresence mode="wait" initial={false}>
           {profileTab === 'overview' && (
             <motion.div
               key="overview"
               initial={reducedMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
-              transition={{ duration: reducedMotion ? 0 : 0.22, ease: EASE }}
+              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+              transition={{ duration: reducedMotion ? 0 : 0.28, ease: EASE }}
               className="space-y-5"
             >
-              {/* Bio */}
-              <section className="glass rounded-[18px] p-5 sm:p-6">
-                <h2 className="text-[13px] font-medium text-fg-muted mb-3">Bio</h2>
+              {/* Bio — README-style preview */}
+              <motion.section
+                layout={!reducedMotion}
+                transition={reducedMotion ? { duration: 0 } : { layout: { duration: 0.32, ease: EASE } }}
+                className="glass rounded-[18px] p-5 sm:p-6"
+              >
+                <p className="mono-label mb-2 !text-[10px] opacity-80">README.md</p>
+                <h2 className="sr-only">Bio</h2>
                 <MorphField
                   editing={isEditing}
                   display={
                     displayBio ? (
                       <p className="text-sm text-fg leading-relaxed">{displayBio}</p>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={startEditing}
-                        className="w-full flex items-center justify-center gap-2 py-6 rounded-[14px] border border-dashed border-white/18 text-[13px] text-fg-subtle hover:border-accent-warm/35 hover:text-fg-muted transition-colors duration-200"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        Add a bio
-                      </button>
+                      <AddInvite label="Add a bio" onClick={startEditing} />
                     )
                   }
                 >
@@ -591,10 +643,14 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                     onChange={setEditBio}
                   />
                 </MorphField>
-              </section>
+              </motion.section>
 
               {/* Stack & interests */}
-              <section className="glass rounded-[18px] p-5 sm:p-6">
+              <motion.section
+                layout={!reducedMotion}
+                transition={reducedMotion ? { duration: 0 } : { layout: { duration: 0.32, ease: EASE } }}
+                className="glass rounded-[18px] p-5 sm:p-6"
+              >
                 <h2 className="text-[13px] font-medium text-fg-muted mb-3">
                   Stack & interests
                 </h2>
@@ -604,27 +660,24 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                     displayInterests.length > 0 ? (
                       <div className="flex flex-wrap gap-2">
                         {displayInterests.map((interest) => {
-                          const Icon = iconForInterest(interest);
+                          const tone = languageTone(interest);
                           return (
                             <span
                               key={interest}
-                              className="inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1.5 rounded-full text-[12px] font-mono text-fg-muted bg-white/6 border border-white/12 transition-transform duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/10 hover:text-fg"
+                              className="inline-flex items-center px-2.5 py-1 rounded-md text-[12px] font-mono border transition-transform duration-200 hover:-translate-y-0.5"
+                              style={{
+                                background: tone.bg,
+                                borderColor: tone.border,
+                                color: tone.text,
+                              }}
                             >
-                              <Icon className="w-3.5 h-3.5 text-accent-warm/80" />
                               {interest}
                             </span>
                           );
                         })}
                       </div>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={startEditing}
-                        className="w-full flex items-center justify-center gap-2 py-6 rounded-[14px] border border-dashed border-white/18 text-[13px] text-fg-subtle hover:border-accent-warm/35 hover:text-fg-muted transition-colors duration-200"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        Add skills
-                      </button>
+                      <AddInvite label="Add skills" onClick={startEditing} />
                     )
                   }
                 >
@@ -632,13 +685,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                     {editInterests.length > 0 && (
                       <div className="flex flex-wrap gap-2">
                         {editInterests.map((interest) => {
-                          const Icon = iconForInterest(interest);
+                          const tone = languageTone(interest);
                           return (
                             <span
                               key={interest}
-                              className="inline-flex items-center gap-1.5 pl-2 pr-1 py-1.5 rounded-full text-[12px] font-mono text-fg-muted bg-white/6 border border-white/12"
+                              className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-md text-[12px] font-mono border"
+                              style={{
+                                background: tone.bg,
+                                borderColor: tone.border,
+                                color: tone.text,
+                              }}
                             >
-                              <Icon className="w-3.5 h-3.5 text-accent-warm/80" />
                               {interest}
                               <button
                                 type="button"
@@ -667,13 +724,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                     </div>
                   </div>
                 </MorphField>
-              </section>
+              </motion.section>
 
               {/* Looking for + Radius */}
               <div className="grid sm:grid-cols-2 gap-4">
-                <section className="glass rounded-[18px] p-5">
+                <motion.section
+                  layout={!reducedMotion}
+                  transition={reducedMotion ? { duration: 0 } : { layout: { duration: 0.32, ease: EASE } }}
+                  className="glass rounded-[18px] p-5"
+                >
                   <div className="flex items-center gap-2 mb-3">
-                    <Search className="w-3.5 h-3.5 text-accent-warm" />
+                    <Search className="w-3.5 h-3.5 text-accent-brand" />
                     <h2 className="text-[13px] font-medium text-fg-muted">Looking for</h2>
                   </div>
                   <MorphField
@@ -689,7 +750,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                                 key={opt}
                                 className={`px-2.5 py-1.5 rounded-full text-[12px] font-medium border ${
                                   on
-                                    ? 'bg-accent-warm/15 border-accent-warm/40 text-fg'
+                                    ? 'bg-accent-brand/15 border-accent-brand/40 text-fg'
                                     : 'bg-white/4 border-white/10 text-fg-subtle'
                                 }`}
                               >
@@ -700,20 +761,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                           {!LOOKING_FOR_PRESETS.some(
                             (o) => o.toLowerCase() === displayLookingFor.toLowerCase()
                           ) && (
-                            <span className="px-2.5 py-1.5 rounded-full text-[12px] font-medium bg-accent-warm/15 border border-accent-warm/40 text-fg">
+                            <span className="px-2.5 py-1.5 rounded-full text-[12px] font-medium bg-accent-brand/15 border border-accent-brand/40 text-fg">
                               {displayLookingFor}
                             </span>
                           )}
                         </div>
                       ) : (
-                        <button
-                          type="button"
+                        <AddInvite
+                          label="Add what you’re looking for"
                           onClick={startEditing}
-                          className="w-full flex items-center justify-center gap-2 py-5 rounded-[14px] border border-dashed border-white/18 text-[13px] text-fg-subtle hover:border-accent-warm/35 hover:text-fg-muted transition-colors duration-200"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          Add what you’re looking for
-                        </button>
+                          className="!py-5"
+                        />
                       )
                     }
                   >
@@ -729,7 +787,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                               onClick={() => setEditLookingFor(opt)}
                               className={`px-2.5 py-1.5 rounded-full text-[12px] font-medium border transition-colors duration-200 ${
                                 on
-                                  ? 'bg-accent-warm/15 border-accent-warm/40 text-fg'
+                                  ? 'bg-accent-brand/15 border-accent-brand/40 text-fg'
                                   : 'bg-white/4 border-white/10 text-fg-subtle hover:border-white/20'
                               }`}
                             >
@@ -745,12 +803,16 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                       />
                     </div>
                   </MorphField>
-                </section>
+                </motion.section>
 
-                <section className="glass rounded-[18px] p-5">
+                <motion.section
+                  layout={!reducedMotion}
+                  transition={reducedMotion ? { duration: 0 } : { layout: { duration: 0.32, ease: EASE } }}
+                  className="glass rounded-[18px] p-5"
+                >
                   <div className="flex items-center justify-between mb-3 gap-2">
                     <div className="flex items-center gap-2">
-                      <MapPin className="w-3.5 h-3.5 text-accent-warm" />
+                      <MapPin className="w-3.5 h-3.5 text-accent-brand" />
                       <h2 className="text-[13px] font-medium text-fg-muted">Radius</h2>
                     </div>
                     {displayRadius !== null && (
@@ -764,7 +826,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                         <div className="pt-1">
                           <div className="h-2 rounded-full bg-white/8 overflow-hidden">
                             <div
-                              className="h-full rounded-full bg-gradient-to-r from-accent-warm to-accent-bright"
+                              className="h-full rounded-full bg-gradient-to-r from-accent-brand to-accent-bright"
                               style={{ width: `${radiusPct}%` }}
                             />
                           </div>
@@ -774,14 +836,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                           </div>
                         </div>
                       ) : (
-                        <button
-                          type="button"
+                        <AddInvite
+                          label="Set your radius"
                           onClick={startEditing}
-                          className="w-full flex items-center justify-center gap-2 py-5 rounded-[14px] border border-dashed border-white/18 text-[13px] text-fg-subtle hover:border-accent-warm/35 hover:text-fg-muted transition-colors duration-200"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          Set your radius
-                        </button>
+                          className="!py-5"
+                        />
                       )
                     }
                   >
@@ -792,7 +851,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                         max={MAX_RADIUS}
                         value={editRadiusLimit}
                         onChange={(e) => setEditRadiusLimit(parseInt(e.target.value, 10) || 0)}
-                        className="w-full accent-[var(--accent-warm)] h-2 cursor-pointer"
+                        className="w-full accent-[var(--accent-brand)] h-2 cursor-pointer"
                       />
                       <div className="flex justify-between mt-2 items-center">
                         <span className="mono-label !text-[10px]">0</span>
@@ -803,7 +862,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                       </div>
                     </div>
                   </MorphField>
-                </section>
+                </motion.section>
               </div>
             </motion.div>
           )}
@@ -813,8 +872,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
               key="activity"
               initial={reducedMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
-              transition={{ duration: reducedMotion ? 0 : 0.22, ease: EASE }}
+              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+              transition={{ duration: reducedMotion ? 0 : 0.28, ease: EASE }}
             >
               {activityEvents.length === 0 ? (
                 <div className="glass rounded-[18px] p-10 text-center">
@@ -834,7 +893,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                     {activityEvents.map((ev, i) => {
                       const Icon =
                         ev.kind === 'match'
-                          ? Heart
+                          ? GitMerge
                           : ev.kind === 'helped'
                             ? HandHelping
                             : Code2;
@@ -854,9 +913,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                           <div
                             className={`relative z-10 w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 border ${
                               ev.kind === 'match'
-                                ? 'bg-accent-warm/12 border-accent-warm/30 text-accent-warm'
+                                ? 'bg-accent-brand/12 border-accent-brand/30 text-accent-brand'
                                 : ev.kind === 'helped'
-                                  ? 'bg-accent-cool/12 border-accent-cool/30 text-accent-cool'
+                                  ? 'bg-accent-merge/12 border-accent-merge/30 text-accent-merge'
                                   : 'bg-white/6 border-white/12 text-fg-muted'
                             }`}
                           >
@@ -885,8 +944,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
               key="preferences"
               initial={reducedMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
-              transition={{ duration: reducedMotion ? 0 : 0.22, ease: EASE }}
+              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+              transition={{ duration: reducedMotion ? 0 : 0.28, ease: EASE }}
               className="space-y-4"
             >
               <section className="glass rounded-[18px] p-5 sm:p-6 space-y-5">
@@ -910,7 +969,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                               <button
                                 type="button"
                                 onClick={startEditing}
-                                className="inline-flex items-center gap-1.5 text-fg-subtle border border-dashed border-white/18 rounded-lg px-2.5 py-1 hover:border-accent-warm/35"
+                                className="inline-flex items-center gap-1.5 text-fg-subtle border border-dashed border-white/18 rounded-lg px-2.5 py-1 hover:border-accent-brand/35"
                               >
                                 <Plus className="w-3 h-3" />
                                 Add age
@@ -945,6 +1004,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
       </div>
     </form>
   );

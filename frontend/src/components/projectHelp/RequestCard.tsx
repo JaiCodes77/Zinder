@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { StatusBadge, type RequestStatus } from '../RequestStepper';
+import { REQUEST_STEPS, StatusBadge, type RequestStatus } from '../RequestStepper';
 import { CATEGORY_COLORS, inferCategory } from './colors';
 import {
   deriveInterested,
@@ -20,6 +20,8 @@ type RequestCardProps = {
   /** Compact preview mode for the new-request review step. */
   preview?: boolean;
   interestOverride?: number;
+  /** Click status badge to cycle (demo / local status without backend). */
+  onCycleStatus?: () => void;
 };
 
 export const RequestCard: React.FC<RequestCardProps> = ({
@@ -28,6 +30,7 @@ export const RequestCard: React.FC<RequestCardProps> = ({
   onClick,
   preview = false,
   interestOverride,
+  onCycleStatus,
 }) => {
   const category = inferCategory(project.title, project.tech_stack || []);
   const colors = CATEGORY_COLORS[category];
@@ -36,37 +39,39 @@ export const RequestCard: React.FC<RequestCardProps> = ({
   const shown = interested.slice(0, 3);
 
   return (
-    <motion.button
-      type="button"
-      onClick={onClick}
-      disabled={preview}
-      className={`group relative w-full text-left glass rounded-[18px] p-5 overflow-hidden transition-[box-shadow,transform,border-color] duration-200 ${
+    <motion.div
+      role={preview ? undefined : 'button'}
+      tabIndex={preview ? undefined : 0}
+      onClick={preview ? undefined : onClick}
+      onKeyDown={
+        preview
+          ? undefined
+          : (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+      }
+      className={`group relative w-full text-left glass rounded-[18px] p-5 ${
         preview ? 'cursor-default' : 'cursor-pointer'
       }`}
       style={{
         borderLeftWidth: 3,
         borderLeftColor: colors.border,
+        boxShadow: '0 0 0 0 transparent',
       }}
       whileHover={
         preview
           ? undefined
           : {
               y: -3,
-              boxShadow: `0 12px 32px rgba(0,0,0,0.35), 0 0 0 1px ${colors.border}55`,
-              borderLeftColor: colors.border,
+              borderLeftColor: colors.bright,
+              boxShadow: `0 14px 36px rgba(0,0,0,0.4), 0 0 0 1px ${colors.border}66, -3px 0 18px ${colors.glow}`,
             }
       }
-      transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 28 }}
     >
-      {/* Intensified left glow on hover */}
-      <div
-        className="pointer-events-none absolute inset-y-0 left-0 w-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-        style={{
-          boxShadow: `-2px 0 16px ${colors.glow}`,
-          background: colors.border,
-        }}
-      />
-
       <div className="flex items-center justify-between mb-3 gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-full bg-ink-750 border border-white/12 flex items-center justify-center text-[11px] font-semibold text-fg-muted flex-shrink-0">
@@ -81,7 +86,22 @@ export const RequestCard: React.FC<RequestCardProps> = ({
             </p>
           </div>
         </div>
-        <StatusBadge status={status} />
+        {onCycleStatus && !preview ? (
+          <button
+            type="button"
+            title="Cycle status to preview badge motion"
+            aria-label={`Status ${status}. Click to cycle.`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCycleStatus();
+            }}
+            className="flex-shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-brand/50"
+          >
+            <StatusBadge status={status} />
+          </button>
+        ) : (
+          <StatusBadge status={status} />
+        )}
       </div>
 
       <RequestProgressBar status={status} className="mb-3" />
@@ -117,6 +137,12 @@ export const RequestCard: React.FC<RequestCardProps> = ({
           </div>
         )}
       </div>
-    </motion.button>
+    </motion.div>
   );
 };
+
+export function nextRequestStatus(current: RequestStatus): RequestStatus {
+  const order = REQUEST_STEPS.map((s) => s.key);
+  const i = order.indexOf(current);
+  return order[(i + 1) % order.length];
+}

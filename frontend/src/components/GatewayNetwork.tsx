@@ -1,9 +1,9 @@
 import React from 'react';
 
 /**
- * Ambient page backdrop — Frosted Ledger stage lighting.
- * Cool ink-navy depth, a warm amber wash (trust), a faint teal
- * answer for “live” energy, and grain to kill banding.
+ * Ambient page backdrop — Merge stage lighting.
+ * Cool blue-graphite depth, a quiet brand-violet wash, faint merge-green
+ * for live energy, and grain to kill banding.
  * Static by design: the interface moves, not the wallpaper.
  */
 
@@ -12,21 +12,25 @@ const NOISE_URI =
 
 export const GatewayNetwork: React.FC = () => {
   return (
-    <div aria-hidden className="absolute inset-0 overflow-hidden pointer-events-none select-none">
-      {/* Warm amber — trust glow from above */}
+    <div
+      aria-hidden
+      data-gateway-network
+      className="app-shell__backdrop"
+    >
+      {/* Brand violet — soft top wash */}
       <div
         className="absolute -top-[38%] left-1/2 -translate-x-1/2 w-[85rem] h-[46rem] rounded-full"
         style={{
           background:
-            'radial-gradient(closest-side, rgba(232, 166, 89, 0.09), rgba(232, 166, 89, 0.02) 55%, transparent 75%)',
+            'radial-gradient(closest-side, rgba(185, 144, 255, 0.08), rgba(185, 144, 255, 0.02) 55%, transparent 75%)',
         }}
       />
-      {/* Cool teal answer from the corner — online/live energy only */}
+      {/* Quiet merge-green from the corner — live energy only */}
       <div
         className="absolute -bottom-[32%] -right-[18%] w-[54rem] h-[38rem] rounded-full"
         style={{
           background:
-            'radial-gradient(closest-side, rgba(94, 234, 212, 0.04), transparent 70%)',
+            'radial-gradient(closest-side, rgba(63, 185, 80, 0.035), transparent 70%)',
         }}
       />
 
@@ -35,7 +39,7 @@ export const GatewayNetwork: React.FC = () => {
         className="absolute inset-0"
         style={{
           backgroundImage:
-            'linear-gradient(rgba(245,243,238,0.028) 1px, transparent 1px), linear-gradient(90deg, rgba(245,243,238,0.028) 1px, transparent 1px)',
+            'linear-gradient(rgba(230,237,243,0.028) 1px, transparent 1px), linear-gradient(90deg, rgba(230,237,243,0.028) 1px, transparent 1px)',
           backgroundSize: '72px 72px',
           maskImage:
             'radial-gradient(ellipse 90% 55% at 50% 0%, black 0%, transparent 100%)',

@@ -122,7 +122,7 @@ export const ProjectHelpDetail: React.FC<ProjectHelpDetailProps> = ({
                         onClick={() => onStatusChange(s)}
                         className={`px-2.5 py-1 rounded-[10px] text-[11px] font-mono border transition-colors ${
                           status === s
-                            ? 'bg-accent-warm/12 text-accent-warm border-accent-warm/30'
+                            ? 'bg-accent-brand/12 text-accent-brand border-accent-brand/30'
                             : 'bg-white/4 text-fg-muted border-white/12'
                         }`}
                       >

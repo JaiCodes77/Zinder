@@ -24,10 +24,10 @@ export const ActivityTimeline: React.FC<ActivityTimelineProps> = ({ status, offe
         {/* Track */}
         <div className="absolute left-[9px] top-2 bottom-2 w-px bg-white/10 overflow-hidden">
           <motion.div
-            className="absolute inset-x-0 top-0 w-px bg-accent-warm origin-top"
+            className="absolute inset-x-0 top-0 w-px bg-accent-brand origin-top"
             style={{
               height: '100%',
-              boxShadow: '0 0 8px rgba(232, 166, 89, 0.45)',
+              boxShadow: '0 0 8px rgba(185, 144, 255, 0.45)',
             }}
             initial={false}
             animate={{ scaleY: fillPct / 100 }}
@@ -44,14 +44,14 @@ export const ActivityTimeline: React.FC<ActivityTimelineProps> = ({ status, offe
                 <motion.span
                   className={`relative z-10 mt-0.5 w-[19px] h-[19px] rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
                     done || current
-                      ? 'bg-accent-warm border-accent-warm'
+                      ? 'bg-accent-brand border-accent-brand'
                       : 'bg-ink-900 border-white/20'
                   }`}
                   animate={{ scale: current ? 1.15 : 1 }}
                   transition={reduced ? { duration: 0 } : { duration: 0.25, ease: EASE }}
                   style={
                     current
-                      ? { boxShadow: '0 0 10px rgba(232, 166, 89, 0.55)' }
+                      ? { boxShadow: '0 0 10px rgba(185, 144, 255, 0.55)' }
                       : undefined
                   }
                 >
@@ -62,7 +62,7 @@ export const ActivityTimeline: React.FC<ActivityTimelineProps> = ({ status, offe
                 <div className="min-w-0 pt-0.5">
                   <p
                     className={`text-[13px] font-medium leading-tight ${
-                      current ? 'text-accent-warm' : done ? 'text-fg' : 'text-fg-subtle'
+                      current ? 'text-accent-brand' : done ? 'text-fg' : 'text-fg-subtle'
                     }`}
                   >
                     {step.label}

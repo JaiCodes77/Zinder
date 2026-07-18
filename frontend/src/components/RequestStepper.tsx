@@ -8,7 +8,7 @@ export const REQUEST_STEPS: { key: RequestStatus; label: string }[] = [
   { key: 'pending', label: 'Pending' },
   { key: 'accepted', label: 'Accepted' },
   { key: 'in_progress', label: 'In Progress' },
-  { key: 'completed', label: 'Completed' },
+  { key: 'completed', label: 'Merged' },
 ];
 
 const stepIndex = (s: RequestStatus) => REQUEST_STEPS.findIndex((x) => x.key === s);
@@ -18,18 +18,19 @@ type RequestStepperProps = {
   onChange?: (next: RequestStatus) => void;
 };
 
-/** Horizontal status stepper — active dot scales with accent-warm; line grows on change. */
+/** Horizontal status stepper — active uses merge green; completed uses brand. */
 export const RequestStepper: React.FC<RequestStepperProps> = ({ status, onChange }) => {
   const active = stepIndex(status);
   const reduced = usePrefersReducedMotion();
   const progress = active <= 0 ? 0 : (active / (REQUEST_STEPS.length - 1)) * 100;
+  const lineColor = status === 'completed' ? 'bg-accent-brand' : 'bg-accent-merge';
 
   return (
     <div className="w-full pt-1 pb-2">
       <div className="relative flex items-center justify-between px-1">
         <div className="absolute left-3 right-3 top-1/2 -translate-y-1/2 h-px bg-white/10" />
         <motion.div
-          className="absolute left-3 top-1/2 -translate-y-1/2 h-px bg-accent-warm origin-left"
+          className={`absolute left-3 top-1/2 -translate-y-1/2 h-px ${lineColor} origin-left`}
           initial={false}
           animate={{ scaleX: progress / 100 }}
           style={{ width: 'calc(100% - 24px)', transformOrigin: 'left center' }}
@@ -42,6 +43,12 @@ export const RequestStepper: React.FC<RequestStepperProps> = ({ status, onChange
         {REQUEST_STEPS.map((step, i) => {
           const isActive = i === active;
           const isDone = i < active;
+          const filled =
+            isActive || isDone
+              ? status === 'completed' || (isDone && i === REQUEST_STEPS.length - 1)
+                ? 'bg-accent-brand border-accent-brand'
+                : 'bg-accent-merge border-accent-merge'
+              : 'bg-ink-900 border-white/20';
           return (
             <button
               key={step.key}
@@ -51,11 +58,7 @@ export const RequestStepper: React.FC<RequestStepperProps> = ({ status, onChange
               className="relative z-10 flex flex-col items-center gap-1.5 group"
             >
               <motion.span
-                className={`block w-2.5 h-2.5 rounded-full border ${
-                  isActive || isDone
-                    ? 'bg-accent-warm border-accent-warm'
-                    : 'bg-ink-900 border-white/20'
-                }`}
+                className={`block w-2.5 h-2.5 rounded-full border ${filled}`}
                 animate={{ scale: isActive ? 1.35 : 1 }}
                 transition={
                   reduced
@@ -65,7 +68,11 @@ export const RequestStepper: React.FC<RequestStepperProps> = ({ status, onChange
               />
               <span
                 className={`text-[10px] font-mono tracking-wide ${
-                  isActive ? 'text-accent-warm' : 'text-fg-subtle'
+                  isActive
+                    ? status === 'completed'
+                      ? 'text-accent-brand'
+                      : 'text-accent-merge'
+                    : 'text-fg-subtle'
                 }`}
               >
                 {step.label}
@@ -82,9 +89,18 @@ type StatusBadgeProps = {
   status: RequestStatus;
 };
 
+/** GitHub-style issue/PR badges — pending outline, accepted/progress merge, completed brand filled. */
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
   const label = REQUEST_STEPS.find((s) => s.key === status)?.label ?? status;
   const reduced = usePrefersReducedMotion();
+
+  const tone =
+    status === 'pending'
+      ? 'bg-transparent text-fg-muted border-fg-subtle/40'
+      : status === 'completed'
+        ? 'bg-accent-brand text-bg-base border-accent-brand'
+        : 'bg-accent-merge/12 text-accent-merge border-accent-merge/35';
+
   return (
     <span className="relative inline-flex h-5 items-center justify-center min-w-[4.5rem]">
       <AnimatePresence mode="wait" initial={false}>
@@ -98,7 +114,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
               ? { duration: 0 }
               : { duration: 0.22, ease: [0.22, 1, 0.36, 1] }
           }
-          className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-accent-warm/12 text-accent-warm border border-accent-warm/25"
+          className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-medium border ${tone}`}
         >
           {label}
         </motion.span>

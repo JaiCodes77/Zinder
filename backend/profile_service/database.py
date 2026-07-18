@@ -4,26 +4,18 @@ import json
 from contextlib import contextmanager
 from typing import Generator, List, Dict, Any, Optional
 
-# The local SQLite database path for Profile Service.
-# Resolved relative to the backend package root (backend/data/profile.db) so the
-# service runs identically regardless of the current working directory or host machine.
 _BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.getenv("PROFILE_DB_PATH", os.path.join(_BACKEND_ROOT, "data", "profile.db"))
 
+
 @contextmanager
 def get_db_conn() -> Generator[sqlite3.Connection, None, None]:
-    """
-    Context manager to safely obtain a database connection to the SQLite database.
-    Ensures that the parent directories exist and SQLite foreign keys are enabled.
-    """
     db_dir = os.path.dirname(DB_PATH)
     if db_dir:
         os.makedirs(db_dir, exist_ok=True)
-    
+
     conn = sqlite3.connect(DB_PATH)
-    # Enable SQLite foreign key constraints (disabled by default in SQLite)
     conn.execute("PRAGMA foreign_keys = ON;")
-    # Allow row access by column names as dictionaries
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -31,18 +23,20 @@ def get_db_conn() -> Generator[sqlite3.Connection, None, None]:
         conn.close()
 
 
+def _column_exists(cursor: sqlite3.Cursor, table: str, column: str) -> bool:
+    cursor.execute(f"PRAGMA table_info({table})")
+    return any(row["name"] == column for row in cursor.fetchall())
+
+
+def _ensure_column(cursor: sqlite3.Cursor, table: str, column: str, ddl: str) -> None:
+    if not _column_exists(cursor, table, column):
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
 def init_db() -> None:
-    """
-    Initialize the database tables if they do not exist.
-    Created tables:
-    1. users: id, email, password_hash, name
-    2. profiles: user_id (UNIQUE FK), age, distance, bio, image, interests (JSON), looking_for, radius_limit
-    3. projects: id, user_id (FK), title, description, tech_stack (JSON), timestamp
-    """
     with get_db_conn() as conn:
         cursor = conn.cursor()
-        
-        # Create users table
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,8 +45,7 @@ def init_db() -> None:
                 name TEXT NOT NULL
             );
         """)
-        
-        # Create profiles table
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS profiles (
                 user_id INTEGER UNIQUE NOT NULL,
@@ -60,137 +53,78 @@ def init_db() -> None:
                 distance TEXT,
                 bio TEXT,
                 image TEXT,
-                interests TEXT, -- Stores JSON list of interests
+                interests TEXT,
                 looking_for TEXT,
                 radius_limit INTEGER,
                 FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
             );
         """)
-        
-        # Create projects table
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 title TEXT NOT NULL,
                 description TEXT NOT NULL,
-                tech_stack TEXT NOT NULL, -- Stores JSON list of technologies
+                tech_stack TEXT NOT NULL,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
             );
         """)
-        
+
+        # Additive migrations for existing SQLite files
+        _ensure_column(cursor, "profiles", "lat", "lat REAL")
+        _ensure_column(cursor, "profiles", "lng", "lng REAL")
+        _ensure_column(cursor, "profiles", "last_active_at", "last_active_at DATETIME")
+        _ensure_column(cursor, "projects", "status", "status TEXT NOT NULL DEFAULT 'pending'")
+        _ensure_column(cursor, "projects", "helper_user_id", "helper_user_id INTEGER")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS project_interested (
+                project_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                note TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (project_id, user_id),
+                FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            );
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS project_comments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                body TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            );
+        """)
+
         conn.commit()
 
-        # Seed the database if no users exist
-        cursor.execute("SELECT COUNT(*) FROM users;")
-        count = cursor.fetchone()[0]
-        if count == 0:
-            import hashlib
-            pass_hash = hashlib.sha256(b"password123").hexdigest()
-            
-            # Seed Alice
-            cursor.execute(
-                "INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?);",
-                ("alice@zinder.internal", pass_hash, "Alice Smith")
-            )
-            alice_id = cursor.lastrowid
-            
-            cursor.execute(
-                """
-                INSERT INTO profiles (user_id, age, distance, bio, image, interests, looking_for, radius_limit)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                (
-                    alice_id,
-                    25,
-                    "3 miles away",
-                    "Frontend wizard looking for a backend buddy to build scaling systems.",
-                    "/profile_1.png",
-                    json.dumps(["React", "CSS", "UI/UX", "Vite"]),
-                    "Backend Partner",
-                    10
-                )
-            )
-            
-            cursor.execute(
-                """
-                INSERT INTO projects (user_id, title, description, tech_stack)
-                VALUES (?, ?, ?, ?);
-                """,
-                (
-                    alice_id,
-                    "Need help scaling WebSockets",
-                    "I have a React frontend and need help designing the horizontal scaling for WebSocket connections.",
-                    json.dumps(["WebSockets", "React", "Node.js"])
-                )
-            )
-            
-            # Seed Bob
-            cursor.execute(
-                "INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?);",
-                ("bob@zinder.internal", pass_hash, "Bob Johnson")
-            )
-            bob_id = cursor.lastrowid
-            
-            cursor.execute(
-                """
-                INSERT INTO profiles (user_id, age, distance, bio, image, interests, looking_for, radius_limit)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                (
-                    bob_id,
-                    30,
-                    "5 miles away",
-                    "Rustacean and systems engineer. I like building compilers and database engines.",
-                    "/profile_2.png",
-                    json.dumps(["Rust", "Systems", "Compilers", "Databases"]),
-                    "Frontend Developer",
-                    15
-                )
-            )
-            
-            cursor.execute(
-                """
-                INSERT INTO projects (user_id, title, description, tech_stack)
-                VALUES (?, ?, ?, ?);
-                """,
-                (
-                    bob_id,
-                    "Building a custom compiler in Rust",
-                    "I am building a toy compiler in Rust and need someone to help build the Monaco editor syntax highlighting.",
-                    json.dumps(["Rust", "Monaco Editor", "TypeScript"])
-                )
-            )
-            
-            conn.commit()
+        # Idempotent demo seed (safe to re-run; upserts by email / project title).
+        from profile_service.seed import seed_demo_data
 
+        seed_demo_data(conn)
 
-
-# ==========================================
-# CRUD HELPER FUNCTIONS
-# ==========================================
 
 # --- User Operations ---
 
 def create_user(email: str, password_hash: str, name: str) -> int:
-    """
-    Inserts a new user record. Returns the generated user ID.
-    """
     with get_db_conn() as conn:
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)",
-            (email.strip().lower(), password_hash, name.strip())
+            (email.strip().lower(), password_hash, name.strip()),
         )
         conn.commit()
         return cursor.lastrowid
 
 
 def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
-    """
-    Retrieves user record by id.
-    """
     with get_db_conn() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
@@ -199,39 +133,62 @@ def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
 
 
 def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
-    """
-    Retrieves user record by email (case-insensitive).
-    """
     with get_db_conn() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE LOWER(email) = ?", (email.strip().lower(),))
+        cursor.execute(
+            "SELECT * FROM users WHERE LOWER(email) = ?",
+            (email.strip().lower(),),
+        )
         row = cursor.fetchone()
         return dict(row) if row else None
 
 
+def update_password_hash(user_id: int, password_hash: str) -> None:
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (password_hash, user_id),
+        )
+        conn.commit()
+
+
 # --- Profile Operations ---
 
+def _parse_interests(raw: Any) -> List[str]:
+    if not raw:
+        return []
+    try:
+        return json.loads(raw) if isinstance(raw, str) else list(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
 def get_profile_by_user_id(user_id: int) -> Optional[Dict[str, Any]]:
-    """
-    Retrieves the profile of a user. The JSON string interests are parsed to a list.
-    """
     with get_db_conn() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM profiles WHERE user_id = ?", (user_id,))
         row = cursor.fetchone()
         if not row:
             return None
-        
         profile = dict(row)
-        if profile.get("interests"):
-            try:
-                profile["interests"] = json.loads(profile["interests"])
-            except (json.JSONDecodeError, TypeError):
-                profile["interests"] = []
-        else:
-            profile["interests"] = []
-            
+        profile["interests"] = _parse_interests(profile.get("interests"))
         return profile
+
+
+def touch_last_active(user_id: int) -> None:
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE profiles SET last_active_at = CURRENT_TIMESTAMP WHERE user_id = ?
+            """,
+            (user_id,),
+        )
+        if cursor.rowcount == 0:
+            # Profile row may not exist yet — ignore
+            pass
+        conn.commit()
 
 
 def create_or_update_profile(
@@ -242,18 +199,21 @@ def create_or_update_profile(
     image: Optional[str] = None,
     interests: Optional[List[str]] = None,
     looking_for: Optional[str] = None,
-    radius_limit: Optional[int] = None
+    radius_limit: Optional[int] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
 ) -> None:
-    """
-    Creates or updates the profile for a given user. Interests list is stored as a JSON string.
-    """
     interests_json = json.dumps(interests if interests is not None else [])
-    
+
     with get_db_conn() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO profiles (user_id, age, distance, bio, image, interests, looking_for, radius_limit)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        cursor.execute(
+            """
+            INSERT INTO profiles (
+                user_id, age, distance, bio, image, interests, looking_for,
+                radius_limit, lat, lng, last_active_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(user_id) DO UPDATE SET
                 age = excluded.age,
                 distance = excluded.distance,
@@ -261,84 +221,393 @@ def create_or_update_profile(
                 image = excluded.image,
                 interests = excluded.interests,
                 looking_for = excluded.looking_for,
-                radius_limit = excluded.radius_limit
-        """, (user_id, age, distance, bio, image, interests_json, looking_for, radius_limit))
+                radius_limit = excluded.radius_limit,
+                lat = COALESCE(excluded.lat, profiles.lat),
+                lng = COALESCE(excluded.lng, profiles.lng),
+                last_active_at = CURRENT_TIMESTAMP
+            """,
+            (
+                user_id,
+                age,
+                distance,
+                bio,
+                image,
+                interests_json,
+                looking_for,
+                radius_limit,
+                lat,
+                lng,
+            ),
+        )
         conn.commit()
+
+
+def get_all_profiles(include_email: bool = False) -> List[Dict[str, Any]]:
+    """
+    Retrieve all profiles. Email is omitted unless include_email=True
+    (service-internal privileged callers only).
+    """
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        if include_email:
+            cursor.execute(
+                """
+                SELECT u.id as user_id, u.email, u.name,
+                       p.age, p.distance, p.bio, p.image, p.interests,
+                       p.looking_for, p.radius_limit, p.lat, p.lng, p.last_active_at
+                FROM users u
+                LEFT JOIN profiles p ON u.id = p.user_id
+                """
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT u.id as user_id, u.name,
+                       p.age, p.distance, p.bio, p.image, p.interests,
+                       p.looking_for, p.radius_limit, p.lat, p.lng, p.last_active_at
+                FROM users u
+                LEFT JOIN profiles p ON u.id = p.user_id
+                """
+            )
+        rows = cursor.fetchall()
+
+    profiles = []
+    for row in rows:
+        profile = dict(row)
+        profile["interests"] = _parse_interests(profile.get("interests"))
+        if not include_email:
+            profile.pop("email", None)
+        if profile.get("last_active_at") is not None:
+            profile["last_active_at"] = str(profile["last_active_at"])
+        profiles.append(profile)
+    return profiles
 
 
 # --- Project Operations ---
 
+PROJECT_STATUSES = ("pending", "accepted", "in_progress", "completed", "cancelled")
+FORWARD_TRANSITIONS = {
+    "pending": {"accepted"},
+    "accepted": {"in_progress"},
+    "in_progress": {"completed"},
+    "completed": set(),
+    "cancelled": set(),
+}
+
+
 def add_project(user_id: int, title: str, description: str, tech_stack: List[str]) -> int:
-    """
-    Adds a new project associated with a user. The tech_stack is stored as a JSON string.
-    Returns the generated project ID.
-    """
     tech_stack_json = json.dumps(tech_stack if tech_stack is not None else [])
     with get_db_conn() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO projects (user_id, title, description, tech_stack)
-            VALUES (?, ?, ?, ?)
-        """, (user_id, title.strip(), description.strip(), tech_stack_json))
+        cursor.execute(
+            """
+            INSERT INTO projects (user_id, title, description, tech_stack, status)
+            VALUES (?, ?, ?, ?, 'pending')
+            """,
+            (user_id, title.strip(), description.strip(), tech_stack_json),
+        )
         conn.commit()
         return cursor.lastrowid
 
 
-def get_projects_by_user_id(user_id: int) -> List[Dict[str, Any]]:
-    """
-    Retrieves all projects associated with a user, sorted by timestamp descending.
-    The tech_stack is returned as a Python list.
-    """
+def _parse_tech(raw: Any) -> List[str]:
+    if not raw:
+        return []
+    try:
+        return json.loads(raw) if isinstance(raw, str) else list(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def get_project_row(project_id: int) -> Optional[Dict[str, Any]]:
     with get_db_conn() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM projects WHERE user_id = ? ORDER BY timestamp DESC, id DESC", (user_id,))
+        cursor.execute(
+            """
+            SELECT p.id, p.user_id, u.name AS user_name, p.title, p.description,
+                   p.tech_stack, p.timestamp, p.status, p.helper_user_id
+            FROM projects p
+            JOIN users u ON p.user_id = u.id
+            WHERE p.id = ?
+            """,
+            (project_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        proj = dict(row)
+        proj["tech_stack"] = _parse_tech(proj.get("tech_stack"))
+        proj["timestamp"] = str(proj["timestamp"])
+        proj["status"] = proj.get("status") or "pending"
+        return proj
+
+
+def list_projects() -> List[Dict[str, Any]]:
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT p.id, p.user_id, u.name AS user_name, p.title, p.description,
+                   p.tech_stack, p.timestamp, p.status, p.helper_user_id
+            FROM projects p
+            JOIN users u ON p.user_id = u.id
+            ORDER BY p.timestamp DESC;
+            """
+        )
+        rows = cursor.fetchall()
+    projects = []
+    for row in rows:
+        proj = dict(row)
+        proj["tech_stack"] = _parse_tech(proj.get("tech_stack"))
+        proj["timestamp"] = str(proj["timestamp"])
+        proj["status"] = proj.get("status") or "pending"
+        projects.append(proj)
+    return projects
+
+
+def update_project_status(
+    project_id: int,
+    new_status: str,
+    actor_user_id: int,
+    helper_user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Enforce status transition rules.
+    Returns updated project row or raises ValueError with a clear message.
+    """
+    project = get_project_row(project_id)
+    if not project:
+        raise ValueError("Project not found.")
+
+    current = project["status"] or "pending"
+    new_status = new_status.strip().lower()
+    if new_status not in PROJECT_STATUSES:
+        raise ValueError(f"Invalid status '{new_status}'.")
+
+    is_owner = actor_user_id == project["user_id"]
+    is_helper = (
+        project.get("helper_user_id") is not None
+        and actor_user_id == project["helper_user_id"]
+    )
+
+    if new_status == "cancelled":
+        if not is_owner:
+            raise ValueError("Only the project owner can cancel.")
+        if current in ("completed", "cancelled"):
+            raise ValueError(f"Cannot cancel a project in status '{current}'.")
+    else:
+        if not (is_owner or is_helper):
+            raise ValueError("Only the owner or accepted helper can change status.")
+        allowed = FORWARD_TRANSITIONS.get(current, set())
+        if new_status not in allowed:
+            raise ValueError(
+                f"Invalid transition from '{current}' to '{new_status}'."
+            )
+        if new_status == "accepted":
+            if not is_owner:
+                raise ValueError("Only the project owner can accept a helper.")
+            if helper_user_id is None:
+                raise ValueError("helper_user_id is required when accepting.")
+            interested = get_interested(project_id)
+            if not any(i["user_id"] == helper_user_id for i in interested):
+                raise ValueError("helper_user_id must be on the interested list.")
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        if new_status == "accepted":
+            cursor.execute(
+                """
+                UPDATE projects
+                SET status = ?, helper_user_id = ?
+                WHERE id = ?
+                """,
+                (new_status, helper_user_id, project_id),
+            )
+        else:
+            cursor.execute(
+                "UPDATE projects SET status = ? WHERE id = ?",
+                (new_status, project_id),
+            )
+        conn.commit()
+
+    updated = get_project_row(project_id)
+    if not updated:
+        raise ValueError("Project not found after update.")
+    return updated
+
+
+def add_interested(project_id: int, user_id: int, note: Optional[str] = None) -> Dict[str, Any]:
+    project = get_project_row(project_id)
+    if not project:
+        raise ValueError("Project not found.")
+    if project["user_id"] == user_id:
+        raise ValueError("Owner cannot mark interest on their own project.")
+    if project["status"] != "pending":
+        raise ValueError("Can only express interest while project is pending.")
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                INSERT INTO project_interested (project_id, user_id, note)
+                VALUES (?, ?, ?)
+                """,
+                (project_id, user_id, note),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            raise ValueError("Already marked as interested.")
+
+    return {
+        "project_id": project_id,
+        "user_id": user_id,
+        "note": note,
+        "created_at": _get_interested_created_at(project_id, user_id),
+    }
+
+
+def _get_interested_created_at(project_id: int, user_id: int) -> str:
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT created_at FROM project_interested
+            WHERE project_id = ? AND user_id = ?
+            """,
+            (project_id, user_id),
+        )
+        row = cursor.fetchone()
+        return str(row["created_at"]) if row else ""
+
+
+def remove_interested(project_id: int, user_id: int) -> bool:
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM project_interested
+            WHERE project_id = ? AND user_id = ?
+            """,
+            (project_id, user_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def get_interested(project_id: int) -> List[Dict[str, Any]]:
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT i.project_id, i.user_id, u.name AS user_name, i.note, i.created_at
+            FROM project_interested i
+            JOIN users u ON u.id = i.user_id
+            WHERE i.project_id = ?
+            ORDER BY i.created_at ASC
+            """,
+            (project_id,),
+        )
+        rows = cursor.fetchall()
+    return [
+        {
+            "project_id": r["project_id"],
+            "user_id": r["user_id"],
+            "user_name": r["user_name"],
+            "note": r["note"],
+            "created_at": str(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+
+def add_comment(project_id: int, user_id: int, body: str) -> Dict[str, Any]:
+    if not get_project_row(project_id):
+        raise ValueError("Project not found.")
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO project_comments (project_id, user_id, body)
+            VALUES (?, ?, ?)
+            """,
+            (project_id, user_id, body.strip()),
+        )
+        comment_id = cursor.lastrowid
+        conn.commit()
+        cursor.execute(
+            """
+            SELECT c.id, c.project_id, c.user_id, u.name AS user_name, c.body, c.created_at
+            FROM project_comments c
+            JOIN users u ON u.id = c.user_id
+            WHERE c.id = ?
+            """,
+            (comment_id,),
+        )
+        row = cursor.fetchone()
+    return {
+        "id": row["id"],
+        "project_id": row["project_id"],
+        "user_id": row["user_id"],
+        "user_name": row["user_name"],
+        "body": row["body"],
+        "created_at": str(row["created_at"]),
+    }
+
+
+def get_comments(project_id: int) -> List[Dict[str, Any]]:
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT c.id, c.project_id, c.user_id, u.name AS user_name, c.body, c.created_at
+            FROM project_comments c
+            JOIN users u ON u.id = c.user_id
+            WHERE c.project_id = ?
+            ORDER BY c.created_at ASC
+            """,
+            (project_id,),
+        )
+        rows = cursor.fetchall()
+    return [
+        {
+            "id": r["id"],
+            "project_id": r["project_id"],
+            "user_id": r["user_id"],
+            "user_name": r["user_name"],
+            "body": r["body"],
+            "created_at": str(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+
+def get_projects_by_user_id(user_id: int) -> List[Dict[str, Any]]:
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM projects
+            WHERE user_id = ?
+            ORDER BY timestamp DESC, id DESC
+            """,
+            (user_id,),
+        )
         rows = cursor.fetchall()
         projects = []
         for row in rows:
             proj = dict(row)
-            if proj.get("tech_stack"):
-                try:
-                    proj["tech_stack"] = json.loads(proj["tech_stack"])
-                except (json.JSONDecodeError, TypeError):
-                    proj["tech_stack"] = []
-            else:
-                proj["tech_stack"] = []
+            proj["tech_stack"] = _parse_tech(proj.get("tech_stack"))
             projects.append(proj)
         return projects
 
 
 def delete_project(project_id: int, user_id: int) -> bool:
-    """
-    Deletes a project by ID and user_id to ensure ownership before deletion.
-    Returns True if deletion succeeded, False otherwise.
-    """
     with get_db_conn() as conn:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM projects WHERE id = ? AND user_id = ?", (project_id, user_id))
+        cursor.execute(
+            "DELETE FROM projects WHERE id = ? AND user_id = ?",
+            (project_id, user_id),
+        )
         conn.commit()
         return cursor.rowcount > 0
-
-def get_all_profiles() -> List[Dict[str, Any]]:
-    """
-    Retrieves all profiles in the system, joining with user details.
-    """
-    with get_db_conn() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT u.id as user_id, u.email, u.name,
-                   p.age, p.distance, p.bio, p.image, p.interests, p.looking_for, p.radius_limit
-            FROM users u
-            LEFT JOIN profiles p ON u.id = p.user_id
-        """)
-        rows = cursor.fetchall()
-        
-    profiles = []
-    for row in rows:
-        profile = dict(row)
-        interests_str = profile.get("interests")
-        try:
-            profile["interests"] = json.loads(interests_str) if interests_str else []
-        except Exception:
-            profile["interests"] = []
-        profiles.append(profile)
-    return profiles

@@ -6,11 +6,12 @@ import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
 import {
   deriveInterested,
   deriveUrgency,
+  EASE,
   SPRING_PILL,
   URGENCY_RANK,
 } from './helpers';
 import type { ListTab, ProjectRequest, SortMode, Urgency } from './types';
-import { RequestCard } from './RequestCard';
+import { nextRequestStatus, RequestCard } from './RequestCard';
 
 type ProjectHelpListProps = {
   projects: ProjectRequest[];
@@ -21,6 +22,7 @@ type ProjectHelpListProps = {
   urgencyOverrides: Record<number, Urgency>;
   onOpenDetail: (id: number) => void;
   onNewRequest: () => void;
+  onStatusChange: (id: number, next: RequestStatus) => void;
 };
 
 const TABS: { key: ListTab; label: string }[] = [
@@ -63,12 +65,15 @@ export const ProjectHelpList: React.FC<ProjectHelpListProps> = ({
   urgencyOverrides,
   onOpenDetail,
   onNewRequest,
+  onStatusChange,
 }) => {
   const reduced = usePrefersReducedMotion();
   const [tab, setTab] = useState<ListTab>('all');
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortMode>('recency');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  /** Bumps on tab switch so cards re-stagger. */
+  const [enterKey, setEnterKey] = useState(0);
 
   const allTags = useMemo(() => {
     const set = new Set<string>();
@@ -143,7 +148,12 @@ export const ProjectHelpList: React.FC<ProjectHelpListProps> = ({
               <button
                 key={key}
                 type="button"
-                onClick={() => setTab(key)}
+                onClick={() => {
+                  if (key !== tab) {
+                    setTab(key);
+                    setEnterKey((k) => k + 1);
+                  }
+                }}
                 aria-pressed={active}
                 className={`relative flex-1 px-2.5 py-1.5 rounded-[10px] text-[12px] font-medium transition-colors duration-200 ${
                   active ? 'text-fg' : 'text-fg-muted'
@@ -183,7 +193,7 @@ export const ProjectHelpList: React.FC<ProjectHelpListProps> = ({
               onClick={() => setSort(key)}
               className={`px-2.5 py-1.5 rounded-[10px] text-[11px] font-mono border transition-colors ${
                 sort === key
-                  ? 'bg-accent-warm/12 text-accent-warm border-accent-warm/30'
+                  ? 'bg-accent-brand/12 text-accent-brand border-accent-brand/30'
                   : 'bg-white/4 text-fg-muted border-white/12 hover:border-white/20'
               }`}
             >
@@ -213,7 +223,7 @@ export const ProjectHelpList: React.FC<ProjectHelpListProps> = ({
               onClick={() => setTagFilter(tagFilter === t ? null : t)}
               className={`px-2 py-0.5 rounded-md text-[11px] font-mono border transition-colors ${
                 tagFilter === t
-                  ? 'bg-accent-cool/12 text-accent-cool border-accent-cool/30'
+                  ? 'bg-accent-brand/12 text-accent-brand border-accent-brand/30'
                   : 'bg-transparent text-fg-subtle border-white/10 hover:border-white/20'
               }`}
             >
@@ -228,14 +238,18 @@ export const ProjectHelpList: React.FC<ProjectHelpListProps> = ({
       ) : filtered.length > 0 ? (
         <div className="space-y-3">
           <AnimatePresence mode="popLayout">
-            {filtered.map((proj) => (
+            {filtered.map((proj, index) => (
               <motion.div
-                key={proj.id}
+                key={`${enterKey}-${proj.id}`}
                 layout
-                initial={reduced ? false : { opacity: 0, y: 6 }}
+                initial={reduced ? false : { opacity: 0, y: 14 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
+                exit={reduced ? { opacity: 0 } : { opacity: 0, y: -6 }}
+                transition={{
+                  duration: reduced ? 0 : 0.32,
+                  delay: reduced ? 0 : index * 0.04,
+                  ease: EASE,
+                }}
               >
                 <RequestCard
                   project={proj}
@@ -247,6 +261,10 @@ export const ProjectHelpList: React.FC<ProjectHelpListProps> = ({
                       : undefined
                   }
                   onClick={() => onOpenDetail(proj.id)}
+                  onCycleStatus={() => {
+                    const cur = projectStatuses[proj.id] || 'pending';
+                    onStatusChange(proj.id, nextRequestStatus(cur));
+                  }}
                 />
               </motion.div>
             ))}

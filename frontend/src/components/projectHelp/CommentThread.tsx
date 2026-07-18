@@ -45,7 +45,7 @@ export const CommentThread: React.FC<CommentThreadProps> = ({ comments }) => {
               <div className="min-w-0 flex-1 flex items-baseline gap-2 flex-wrap">
                 <span className="text-[13px] font-medium text-fg truncate">{c.authorName}</span>
                 {c.isRequester && (
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent-cool/10 text-accent-cool border border-accent-cool/25">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent-merge/10 text-accent-merge border border-accent-merge/25">
                     Author
                   </span>
                 )}

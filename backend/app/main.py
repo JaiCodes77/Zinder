@@ -2,48 +2,63 @@ import json
 import uuid
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional
-from fastapi import FastAPI, Depends, Response, status, HTTPException
+from fastapi import (
+    FastAPI,
+    Depends,
+    Response,
+    status,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    Query,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import redis.asyncio as redis
 import httpx
+import websockets
 
 from app.config import settings
 from app.dependencies.auth import validate_session, get_redis
+from shared.internal_auth import internal_headers
 
-# ==========================================
-# LIFESPAN MANAGER (REDIS CONNECTION POOL)
-# ==========================================
+PROFILE_SERVICE_URL = settings.PROFILE_SERVICE_URL
+MATCHER_SERVICE_URL = settings.MATCHER_SERVICE_URL
+CHAT_SERVICE_URL = settings.CHAT_SERVICE_URL
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize in-memory session store
+    # Keep shared.internal_auth in sync with pydantic-loaded .env
+    import os
+
+    os.environ.setdefault(
+        "INTERNAL_SERVICE_SECRET", settings.INTERNAL_SERVICE_SECRET
+    )
     app.state.memory_sessions = {}
-    
-    # Startup: Initialize the Redis connection pool
     try:
         app.state.redis_pool = redis.ConnectionPool.from_url(
             settings.REDIS_URL,
-            max_connections=50,  # Optimized pool size for microservices gateway
-            decode_responses=False
+            max_connections=50,
+            decode_responses=False,
         )
     except Exception:
         app.state.redis_pool = None
     yield
-    # Shutdown: Gracefully close the Redis connection pool
     if getattr(app.state, "redis_pool", None) is not None:
         try:
             await app.state.redis_pool.disconnect()
         except Exception:
             pass
 
-# Initialize FastAPI App with Lifespan
+
 app = FastAPI(
     title="Zinder API Gateway",
-    version="1.0.0",
-    lifespan=lifespan
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
-# Configure CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -51,6 +66,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ==========================================
 # REQUEST SCHEMAS
@@ -60,9 +76,11 @@ class UserRegister(BaseModel):
     password: str = Field(..., min_length=8, description="User password")
     name: str = Field(..., min_length=2, description="User full name")
 
+
 class UserLogin(BaseModel):
     email: str = Field(..., description="User email or username")
     password: str = Field(..., description="User password")
+
 
 class ProfileUpdate(BaseModel):
     age: Optional[int] = Field(None, ge=18, le=120)
@@ -72,345 +90,549 @@ class ProfileUpdate(BaseModel):
     interests: List[str] = Field(default_factory=list)
     looking_for: Optional[str] = None
     radius_limit: Optional[int] = Field(None, ge=0)
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
-# ==========================================
-# API ROUTE ENDPOINTS
-# ==========================================
-
-@app.post("/api/v1/auth/register", status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserRegister) -> Dict[str, Any]:
-    """
-    Asynchronous API Gateway endpoint that proxies the registration request
-    downstream to the dedicated Authentication/Profile microservice.
-    """
-    async with httpx.AsyncClient() as client:
-        try: 
-            response = await client.post(
-                "http://localhost:8081/api/v1/users",
-                json=user_data.model_dump(),  # Pydantic v2 method to serialize class to dict
-                timeout=5.0
-            ) 
-
-            if response.status_code != status.HTTP_201_CREATED:
-                raise HTTPException(
-                    status_code = response.status_code, 
-                    detail = response.json().get("detail", "Registration downstream error")
-                ) 
-    
-            return response.json()  
-
-        except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Profile Service Unavailable: {exc}"
-            )
-
-@app.post("/api/v1/auth/login", status_code=status.HTTP_200_OK)
-async def login(
-    credentials: UserLogin, 
-    response: Response, 
-    redis_client: redis.Redis | None = Depends(get_redis)
-) -> Dict[str, Any]:
-    """
-    Public login endpoint.
-    1. Proxies credentials to the downstream Profile/Auth microservice for verification.
-    2. Generates a secure session ID (UUID) if validation succeeds.
-    3. Caches the user session payload inside Redis (or local memory fallback) for 24 hours.
-    4. Attaches the session ID via a secure, HTTP-only cookie.
-    """
-    # 1. Open an asynchronous network client to proxy credentials downstream
-    async with httpx.AsyncClient() as client:
-        try: 
-            # Send verification POST request to the downstream User/Profile microservice
-            auth_response = await client.post(
-                "http://localhost:8081/api/v1/users/verify",
-                json=credentials.model_dump(),
-                timeout=5.0
-            ) 
-            # If the downstream microservice reports verification failure, propagate the error response
-            if auth_response.status_code != status.HTTP_200_OK:
-                raise HTTPException(
-                    status_code = auth_response.status_code,
-                    detail = auth_response.json().get("detail", "Invalid user or password.")
-                ) 
-            # Parse verified user record returned from downstream service
-            user_data = auth_response.json()
-        except httpx.RequestError as exc:
-            # Handle downstream microservice server down or connection timeout
-            raise HTTPException(
-                status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail = f"Profile Verification Service Unavailable: {exc}"
-            ) 
-
-    # 2. Generate a secure, unique user session ID
-    session_id = str(uuid.uuid4())
-
-    # 3. Create the session payload to cache
-    session_payload = {
-        "userId": user_data.get("id"),
-        "email": user_data.get("email"),
-        "role": user_data.get("role", "user")
-    }
-
-    # 4. Write session payload to Redis cache (or local memory)
-    session_written = False
-    if redis_client is not None:
-        try:
-            await redis_client.set(
-                name = f"session:{session_id}",
-                value=json.dumps(session_payload),
-                ex=86400
-            ) 
-            session_written = True
-        except Exception:
-            pass
-
-    if not session_written:
-        # Save to memory fallback
-        memory_sessions = getattr(app.state, "memory_sessions", None)
-        if memory_sessions is not None:
-            memory_sessions[f"session:{session_id}"] = json.dumps(session_payload)
-        else:
-            from app.dependencies.auth import MEMORY_SESSIONS
-            MEMORY_SESSIONS[f"session:{session_id}"] = json.dumps(session_payload)
-    
-    # 5. Set HTTP-only Cookie containing the session ID in response headers
-    response.set_cookie(
-        key="sessionId",
-        value=session_id,
-        httponly=True,  # Blocks cross-site scripting (XSS) access to cookie
-        secure=False,   # Set to True in HTTPS production environments
-        samesite="lax", # Enforces lax cookie sharing rules (CSRF protection)
-        max_age=86400   # 24 hour duration matching Redis cache expiration
-    )
-
-    return {
-        "status": "success",
-        "message": "User credentials verified. Session established.",
-        "session_info": {
-            "email": session_payload["email"]
-        }
-    }
-    
-# Downstream matcher service URL configuration
-MATCHER_SERVICE_URL = "http://localhost:8082" 
 
 class SwipeRequest(BaseModel):
     swiped_id: int = Field(..., description="The ID of the user being swiped on")
     action: str = Field(..., description="Swipe action: 'LIKE', 'PASS', 'SUPERLIKE'")
 
-@app.get("/api/v1/matcher/browse", status_code=status.HTTP_200_OK)
-async def browse(session: Dict[str, Any] = Depends(validate_session)) -> Any:
-    """
-    Protected browsing route.
-    1. Validates the request sessionId cookie against Redis/Memory (via validate_session).
-    2. Proxies the request to the Matcher Microservice, passing the authenticated userId in X-User-Id header.
-    """
-    # 1. Retrieve the userId from the validated session
-    user_id = session.get("userId")
-    if not user_id:
-        raise HTTPException(
-            status_code = status.HTTP_400_BAD_REQUEST,
-            detail="Session payload is missing user identification credentials"
-        ) 
-    
-    # 2. Proxy request asynchronously to the Matcher Microservice
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(
-                f"{MATCHER_SERVICE_URL}/api/v1/matcher/browse",
-                headers={"X-User-Id": str(user_id)},
-                timeout=5.0
-            ) 
-
-            # 3. Handle downstream microservice failure states
-            if response.status_code != status.HTTP_200_OK:
-                raise HTTPException(
-                    status_code = response.status_code,
-                    detail = response.json().get("detail", "Matcher service error")
-                )  
-
-            # 4. Return matching cards payload
-            return response.json()
-        
-        except httpx.RequestError as exc:
-            # 5. Handle cases where the Matcher microservice node is offline
-            raise HTTPException(
-                status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail = f"Matcher Service Unavailable: {exc}"
-            )   
-
-@app.post("/api/v1/matcher/swipe", status_code=status.HTTP_200_OK)
-async def swipe(swipe_data: SwipeRequest, session: Dict[str, Any] = Depends(validate_session)) -> Dict[str, Any]:
-    """
-    Protected swipe route.
-    Proxies swipe action downstream to Matcher Service.
-    """
-    user_id = session.get("userId")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Session payload is missing user identification credentials"
-        )
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                f"{MATCHER_SERVICE_URL}/api/v1/matcher/swipe",
-                json=swipe_data.model_dump(),
-                headers={"X-User-Id": str(user_id)},
-                timeout=5.0
-            )
-            if response.status_code != status.HTTP_200_OK:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=response.json().get("detail", "Matcher service error")
-                )
-            return response.json()
-        except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Matcher Service Unavailable: {exc}"
-            )
-
-@app.get("/api/v1/matcher/matches", status_code=status.HTTP_200_OK)
-async def get_matches(session: Dict[str, Any] = Depends(validate_session)) -> Any:
-    """
-    Protected matches retrieval route.
-    Proxies matches request downstream to Matcher Service.
-    """
-    user_id = session.get("userId")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Session payload is missing user identification credentials"
-        )
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(
-                f"{MATCHER_SERVICE_URL}/api/v1/matcher/matches",
-                headers={"X-User-Id": str(user_id)},
-                timeout=5.0
-            )
-            if response.status_code != status.HTTP_200_OK:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=response.json().get("detail", "Matcher service error")
-                )
-            return response.json()
-        except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Matcher Service Unavailable: {exc}"
-            )
-
-# ==========================================
-# PROJECTS & PROFILE ME ROUTING
-# ==========================================
 
 class ProjectCreate(BaseModel):
     title: str = Field(..., min_length=3, description="Project title")
     description: str = Field(..., min_length=10, description="Project description")
     tech_stack: List[str] = Field(..., description="List of technologies used")
 
+
+class ProjectStatusUpdate(BaseModel):
+    status: str
+    helper_user_id: Optional[int] = None
+
+
+class InterestedCreate(BaseModel):
+    note: Optional[str] = None
+
+
+class CommentCreate(BaseModel):
+    body: str = Field(..., min_length=1, max_length=2000)
+
+
+class MessageCreate(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+
+
+class ReadUpdate(BaseModel):
+    up_to_message_id: int
+
+
+def _session_user_id(session: Dict[str, Any]) -> int:
+    user_id = session.get("userId")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session payload is missing user identification credentials",
+        )
+    return int(user_id)
+
+
+async def _proxy_json(
+    method: str,
+    url: str,
+    user_id: Optional[int] = None,
+    json_body: Any = None,
+    params: Optional[dict] = None,
+    expected: Optional[set] = None,
+) -> Any:
+    expected = expected or {200, 201, 204}
+    headers = internal_headers(user_id) if user_id is not None else internal_headers()
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.request(
+                method,
+                url,
+                headers=headers,
+                json=json_body,
+                params=params,
+                timeout=10.0,
+            )
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Downstream service unavailable: {exc}",
+            )
+    if response.status_code not in expected:
+        detail = "Downstream service error"
+        try:
+            detail = response.json().get("detail", detail)
+        except Exception:
+            pass
+        raise HTTPException(status_code=response.status_code, detail=detail)
+    if response.status_code == 204 or not response.content:
+        return None
+    return response.json()
+
+
+# ==========================================
+# AUTH
+# ==========================================
+
+@app.post("/api/v1/auth/register", status_code=status.HTTP_201_CREATED)
+async def register(user_data: UserRegister) -> Dict[str, Any]:
+    return await _proxy_json(
+        "POST",
+        f"{PROFILE_SERVICE_URL}/api/v1/users",
+        json_body=user_data.model_dump(),
+        expected={201},
+    )
+
+
+@app.post("/api/v1/auth/login", status_code=status.HTTP_200_OK)
+async def login(
+    credentials: UserLogin,
+    response: Response,
+    redis_client: redis.Redis | None = Depends(get_redis),
+) -> Dict[str, Any]:
+    user_data = await _proxy_json(
+        "POST",
+        f"{PROFILE_SERVICE_URL}/api/v1/users/verify",
+        json_body=credentials.model_dump(),
+        expected={200},
+    )
+
+    session_id = str(uuid.uuid4())
+    session_payload = {
+        "userId": user_data.get("id"),
+        "email": user_data.get("email"),
+        "name": user_data.get("name"),
+        "role": user_data.get("role", "user"),
+    }
+
+    session_written = False
+    if redis_client is not None:
+        try:
+            await redis_client.set(
+                name=f"session:{session_id}",
+                value=json.dumps(session_payload),
+                ex=86400,
+            )
+            session_written = True
+        except Exception:
+            pass
+
+    if not session_written:
+        memory_sessions = getattr(app.state, "memory_sessions", None)
+        if memory_sessions is not None:
+            memory_sessions[f"session:{session_id}"] = json.dumps(session_payload)
+        else:
+            from app.dependencies.auth import MEMORY_SESSIONS
+
+            MEMORY_SESSIONS[f"session:{session_id}"] = json.dumps(session_payload)
+
+    response.set_cookie(
+        key="sessionId",
+        value=session_id,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=86400,
+    )
+
+    # Contract: { id, email, name } + Set-Cookie
+    return {
+        "id": user_data.get("id"),
+        "email": user_data.get("email"),
+        "name": user_data.get("name"),
+    }
+
+
+@app.post("/api/v1/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    request: Request,
+    response: Response,
+    redis_client: redis.Redis | None = Depends(get_redis),
+):
+    session_id = request.cookies.get("sessionId")
+    if session_id:
+        if redis_client is not None:
+            try:
+                await redis_client.delete(f"session:{session_id}")
+            except Exception:
+                pass
+        memory_sessions = getattr(request.app.state, "memory_sessions", None)
+        if memory_sessions is not None:
+            memory_sessions.pop(f"session:{session_id}", None)
+        else:
+            from app.dependencies.auth import MEMORY_SESSIONS
+
+            MEMORY_SESSIONS.pop(f"session:{session_id}", None)
+
+    response.delete_cookie(key="sessionId")
+    return None
+
+
+@app.get("/api/v1/auth/me", status_code=status.HTTP_200_OK)
+async def auth_me(session: Dict[str, Any] = Depends(validate_session)) -> Dict[str, Any]:
+    user_id = session.get("userId")
+    email = session.get("email")
+    name = session.get("name")
+    # Refresh name from profile service when missing from older sessions
+    if user_id and (not name or not email):
+        profile = await _proxy_json(
+            "GET",
+            f"{PROFILE_SERVICE_URL}/api/v1/profiles/me",
+            user_id=int(user_id),
+            expected={200},
+        )
+        return {
+            "id": profile["user"]["id"],
+            "email": profile["user"]["email"],
+            "name": profile["user"]["name"],
+        }
+    return {"id": user_id, "email": email, "name": name}
+
+
+# ==========================================
+# MATCHER
+# ==========================================
+
+@app.get("/api/v1/matcher/browse", status_code=status.HTTP_200_OK)
+async def browse(
+    request: Request,
+    session: Dict[str, Any] = Depends(validate_session),
+) -> Any:
+    user_id = _session_user_id(session)
+    params = dict(request.query_params)
+    return await _proxy_json(
+        "GET",
+        f"{MATCHER_SERVICE_URL}/api/v1/matcher/browse",
+        user_id=user_id,
+        params=params,
+        expected={200},
+    )
+
+
+@app.post("/api/v1/matcher/swipe", status_code=status.HTTP_200_OK)
+async def swipe(
+    swipe_data: SwipeRequest,
+    session: Dict[str, Any] = Depends(validate_session),
+) -> Dict[str, Any]:
+    user_id = _session_user_id(session)
+    return await _proxy_json(
+        "POST",
+        f"{MATCHER_SERVICE_URL}/api/v1/matcher/swipe",
+        user_id=user_id,
+        json_body=swipe_data.model_dump(),
+        expected={200},
+    )
+
+
+@app.delete("/api/v1/matcher/swipe/last", status_code=status.HTTP_200_OK)
+async def undo_swipe(session: Dict[str, Any] = Depends(validate_session)) -> Dict[str, Any]:
+    user_id = _session_user_id(session)
+    return await _proxy_json(
+        "DELETE",
+        f"{MATCHER_SERVICE_URL}/api/v1/matcher/swipe/last",
+        user_id=user_id,
+        expected={200},
+    )
+
+
+@app.get("/api/v1/matcher/matches", status_code=status.HTTP_200_OK)
+async def get_matches(session: Dict[str, Any] = Depends(validate_session)) -> Any:
+    user_id = _session_user_id(session)
+    return await _proxy_json(
+        "GET",
+        f"{MATCHER_SERVICE_URL}/api/v1/matcher/matches",
+        user_id=user_id,
+        expected={200},
+    )
+
+
+# ==========================================
+# PROFILES
+# ==========================================
+
 @app.get("/api/v1/profiles/me", status_code=status.HTTP_200_OK)
 async def get_my_profile(session: Dict[str, Any] = Depends(validate_session)) -> Dict[str, Any]:
-    user_id = session.get("userId")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Session payload is missing user identification credentials"
-        )
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(
-                "http://localhost:8081/api/v1/profiles/me",
-                headers={"X-User-Id": str(user_id)},
-                timeout=5.0
-            )
-            if response.status_code != status.HTTP_200_OK:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=response.json().get("detail", "Profile service error")
-                )
-            return response.json()
-        except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Profile Service Unavailable: {exc}"
-            )
+    user_id = _session_user_id(session)
+    return await _proxy_json(
+        "GET",
+        f"{PROFILE_SERVICE_URL}/api/v1/profiles/me",
+        user_id=user_id,
+        expected={200},
+    )
+
 
 @app.post("/api/v1/profiles", status_code=status.HTTP_200_OK)
-async def update_profile(profile_data: ProfileUpdate, session: Dict[str, Any] = Depends(validate_session)) -> Dict[str, Any]:
-    user_id = session.get("userId")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Session payload is missing user identification credentials"
-        )
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                "http://localhost:8081/api/v1/profiles",
-                json=profile_data.model_dump(),
-                headers={"X-User-Id": str(user_id)},
-                timeout=5.0
-            )
-            if response.status_code != status.HTTP_200_OK:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=response.json().get("detail", "Profile service error")
-                )
-            return response.json()
-        except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Profile Service Unavailable: {exc}"
-            )
+async def update_profile(
+    profile_data: ProfileUpdate,
+    session: Dict[str, Any] = Depends(validate_session),
+) -> Dict[str, Any]:
+    user_id = _session_user_id(session)
+    return await _proxy_json(
+        "POST",
+        f"{PROFILE_SERVICE_URL}/api/v1/profiles",
+        user_id=user_id,
+        json_body=profile_data.model_dump(),
+        expected={200},
+    )
+
+
+# ==========================================
+# PROJECTS
+# ==========================================
 
 @app.get("/api/v1/projects", status_code=status.HTTP_200_OK)
 async def get_projects(session: Dict[str, Any] = Depends(validate_session)) -> Any:
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(
-                "http://localhost:8081/api/v1/projects",
-                timeout=5.0
-            )
-            if response.status_code != status.HTTP_200_OK:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=response.json().get("detail", "Profile service error")
-                )
-            return response.json()
-        except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Profile Service Unavailable: {exc}"
-            )
+    _session_user_id(session)
+    return await _proxy_json(
+        "GET",
+        f"{PROFILE_SERVICE_URL}/api/v1/projects",
+        expected={200},
+    )
+
 
 @app.post("/api/v1/projects", status_code=status.HTTP_201_CREATED)
-async def create_project(project_data: ProjectCreate, session: Dict[str, Any] = Depends(validate_session)) -> Dict[str, Any]:
-    user_id = session.get("userId")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Session payload is missing user identification credentials"
-        )
-    async with httpx.AsyncClient() as client:
+async def create_project(
+    project_data: ProjectCreate,
+    session: Dict[str, Any] = Depends(validate_session),
+) -> Dict[str, Any]:
+    user_id = _session_user_id(session)
+    return await _proxy_json(
+        "POST",
+        f"{PROFILE_SERVICE_URL}/api/v1/projects",
+        user_id=user_id,
+        json_body=project_data.model_dump(),
+        expected={201},
+    )
+
+
+@app.get("/api/v1/projects/{project_id}", status_code=status.HTTP_200_OK)
+async def get_project(
+    project_id: int,
+    session: Dict[str, Any] = Depends(validate_session),
+) -> Any:
+    _session_user_id(session)
+    return await _proxy_json(
+        "GET",
+        f"{PROFILE_SERVICE_URL}/api/v1/projects/{project_id}",
+        expected={200},
+    )
+
+
+@app.patch("/api/v1/projects/{project_id}/status", status_code=status.HTTP_200_OK)
+async def patch_project_status(
+    project_id: int,
+    body: ProjectStatusUpdate,
+    session: Dict[str, Any] = Depends(validate_session),
+) -> Any:
+    user_id = _session_user_id(session)
+    return await _proxy_json(
+        "PATCH",
+        f"{PROFILE_SERVICE_URL}/api/v1/projects/{project_id}/status",
+        user_id=user_id,
+        json_body=body.model_dump(),
+        expected={200},
+    )
+
+
+@app.post("/api/v1/projects/{project_id}/interested", status_code=status.HTTP_201_CREATED)
+async def post_interested(
+    project_id: int,
+    body: InterestedCreate,
+    session: Dict[str, Any] = Depends(validate_session),
+) -> Any:
+    user_id = _session_user_id(session)
+    return await _proxy_json(
+        "POST",
+        f"{PROFILE_SERVICE_URL}/api/v1/projects/{project_id}/interested",
+        user_id=user_id,
+        json_body=body.model_dump(),
+        expected={201},
+    )
+
+
+@app.delete("/api/v1/projects/{project_id}/interested", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_interested(
+    project_id: int,
+    session: Dict[str, Any] = Depends(validate_session),
+):
+    user_id = _session_user_id(session)
+    await _proxy_json(
+        "DELETE",
+        f"{PROFILE_SERVICE_URL}/api/v1/projects/{project_id}/interested",
+        user_id=user_id,
+        expected={204},
+    )
+    return None
+
+
+@app.get("/api/v1/projects/{project_id}/comments", status_code=status.HTTP_200_OK)
+async def get_comments(
+    project_id: int,
+    session: Dict[str, Any] = Depends(validate_session),
+) -> Any:
+    _session_user_id(session)
+    return await _proxy_json(
+        "GET",
+        f"{PROFILE_SERVICE_URL}/api/v1/projects/{project_id}/comments",
+        expected={200},
+    )
+
+
+@app.post("/api/v1/projects/{project_id}/comments", status_code=status.HTTP_201_CREATED)
+async def post_comment(
+    project_id: int,
+    body: CommentCreate,
+    session: Dict[str, Any] = Depends(validate_session),
+) -> Any:
+    user_id = _session_user_id(session)
+    return await _proxy_json(
+        "POST",
+        f"{PROFILE_SERVICE_URL}/api/v1/projects/{project_id}/comments",
+        user_id=user_id,
+        json_body=body.model_dump(),
+        expected={201},
+    )
+
+
+# ==========================================
+# CHAT
+# ==========================================
+
+@app.get("/api/v1/chat/conversations/{match_id}/messages", status_code=status.HTTP_200_OK)
+async def chat_messages(
+    match_id: int,
+    session: Dict[str, Any] = Depends(validate_session),
+    before: Optional[int] = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+) -> Any:
+    user_id = _session_user_id(session)
+    params: dict = {"limit": limit}
+    if before is not None:
+        params["before"] = before
+    return await _proxy_json(
+        "GET",
+        f"{CHAT_SERVICE_URL}/api/v1/chat/conversations/{match_id}/messages",
+        user_id=user_id,
+        params=params,
+        expected={200},
+    )
+
+
+@app.post(
+    "/api/v1/chat/conversations/{match_id}/messages",
+    status_code=status.HTTP_201_CREATED,
+)
+async def chat_post_message(
+    match_id: int,
+    body: MessageCreate,
+    session: Dict[str, Any] = Depends(validate_session),
+) -> Any:
+    user_id = _session_user_id(session)
+    return await _proxy_json(
+        "POST",
+        f"{CHAT_SERVICE_URL}/api/v1/chat/conversations/{match_id}/messages",
+        user_id=user_id,
+        json_body=body.model_dump(),
+        expected={201},
+    )
+
+
+@app.post(
+    "/api/v1/chat/conversations/{match_id}/read",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def chat_read(
+    match_id: int,
+    body: ReadUpdate,
+    session: Dict[str, Any] = Depends(validate_session),
+):
+    user_id = _session_user_id(session)
+    await _proxy_json(
+        "POST",
+        f"{CHAT_SERVICE_URL}/api/v1/chat/conversations/{match_id}/read",
+        user_id=user_id,
+        json_body=body.model_dump(),
+        expected={204},
+    )
+    return None
+
+
+@app.websocket("/api/v1/chat/ws")
+async def chat_ws_proxy(websocket: WebSocket):
+    """
+    Validate session cookie, then bridge to the Chat Service WebSocket,
+    injecting X-Internal-Secret + X-User-Id so the chat service never trusts
+    a raw browser-supplied user id.
+    """
+    await websocket.accept()
+    session_id = websocket.cookies.get("sessionId")
+    if not session_id:
+        await websocket.close(code=4401)
+        return
+
+    session_data = None
+    # Try Redis via app pool
+    pool = getattr(websocket.app.state, "redis_pool", None)
+    if pool is not None:
+        client = redis.Redis(connection_pool=pool)
         try:
-            response = await client.post(
-                "http://localhost:8081/api/v1/projects",
-                json=project_data.model_dump(),
-                headers={"X-User-Id": str(user_id)},
-                timeout=5.0
-            )
-            if response.status_code != status.HTTP_201_CREATED:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=response.json().get("detail", "Profile service error")
-                )
-            return response.json()
-        except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Profile Service Unavailable: {exc}"
-            )
+            raw = await client.get(f"session:{session_id}")
+            if raw:
+                session_data = json.loads(raw.decode("utf-8"))
+        except Exception:
+            pass
+        finally:
+            try:
+                await client.close()
+            except Exception:
+                pass
+
+    if session_data is None:
+        memory_sessions = getattr(websocket.app.state, "memory_sessions", {})
+        session_str = memory_sessions.get(f"session:{session_id}")
+        if session_str:
+            try:
+                session_data = json.loads(session_str)
+            except Exception:
+                session_data = None
+
+    if not session_data or not session_data.get("userId"):
+        await websocket.close(code=4401)
+        return
+
+    user_id = session_data["userId"]
+    headers = [
+        ("X-Internal-Secret", internal_headers()["X-Internal-Secret"]),
+        ("X-User-Id", str(user_id)),
+    ]
+    ws_url = CHAT_SERVICE_URL.replace("http://", "ws://").replace("https://", "wss://")
+    ws_url = f"{ws_url}/api/v1/chat/ws"
+
+    try:
+        async with websockets.connect(ws_url, additional_headers=headers) as upstream:
+            async def client_to_upstream():
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        await upstream.send(data)
+                except WebSocketDisconnect:
+                    await upstream.close()
+
+            async def upstream_to_client():
+                try:
+                    async for message in upstream:
+                        await websocket.send_text(message)
+                except Exception:
+                    await websocket.close()
+
+            import asyncio
+
+            await asyncio.gather(client_to_upstream(), upstream_to_client())
+    except Exception:
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass

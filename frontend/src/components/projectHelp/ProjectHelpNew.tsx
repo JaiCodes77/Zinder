@@ -142,18 +142,18 @@ export const ProjectHelpNew: React.FC<ProjectHelpNewProps> = ({
             <div key={label} className="flex-1 flex flex-col gap-1.5">
               <div className="h-1 rounded-full bg-white/8 overflow-hidden">
                 <motion.div
-                  className="h-full rounded-full bg-accent-warm"
+                  className="h-full rounded-full bg-accent-brand"
                   initial={false}
                   animate={{ width: i <= step ? '100%' : '0%' }}
                   transition={reduced ? { duration: 0 } : { duration: 0.3, ease: EASE }}
                   style={{
-                    boxShadow: i === step ? '0 0 8px rgba(232,166,89,0.5)' : undefined,
+                    boxShadow: i === step ? '0 0 8px rgba(185,144,255,0.5)' : undefined,
                   }}
                 />
               </div>
               <span
                 className={`text-[10px] font-mono ${
-                  i === step ? 'text-accent-warm' : i < step ? 'text-fg-muted' : 'text-fg-subtle'
+                  i === step ? 'text-accent-brand' : i < step ? 'text-fg-muted' : 'text-fg-subtle'
                 }`}
               >
                 {label}
@@ -237,7 +237,7 @@ export const ProjectHelpNew: React.FC<ProjectHelpNewProps> = ({
                         key={t}
                         type="button"
                         onClick={() => addTech(t)}
-                        className="px-2.5 py-1 rounded-md text-[12px] font-mono border border-white/12 text-fg-muted hover:border-accent-warm/40 hover:text-accent-warm transition-colors"
+                        className="px-2.5 py-1 rounded-md text-[12px] font-mono border border-white/12 text-fg-muted hover:border-accent-brand/40 hover:text-accent-brand transition-colors"
                       >
                         + {t}
                       </button>
@@ -265,7 +265,7 @@ export const ProjectHelpNew: React.FC<ProjectHelpNewProps> = ({
                         onClick={() => setUrgency(key)}
                         className={`flex-1 px-3 py-2 rounded-[12px] text-[13px] border transition-colors ${
                           urgency === key
-                            ? 'bg-accent-warm/12 text-accent-warm border-accent-warm/30'
+                            ? 'bg-accent-brand/12 text-accent-brand border-accent-brand/30'
                             : 'bg-white/4 text-fg-muted border-white/12'
                         }`}
                       >

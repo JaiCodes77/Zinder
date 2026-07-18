@@ -299,7 +299,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                 role="status"
                 className={`px-3.5 py-3 rounded-lg flex items-start gap-2.5 mb-5 text-[13px] leading-snug border ${
                   toastMessage.type === 'success'
-                    ? 'bg-like/8 border-like/20 text-like'
+                    ? 'bg-accent-brand/10 border-accent-brand/25 text-accent-brand'
                     : 'bg-pass/8 border-pass/20 text-pass'
                 }`}
               >

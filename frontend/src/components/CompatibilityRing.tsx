@@ -9,29 +9,14 @@ type CompatibilityRingProps = {
   className?: string;
 };
 
-function scoreBandColor(score: number): { stroke: string; glow: string; text: string } {
-  if (score >= 80) {
-    return {
-      stroke: 'var(--accent-cool)',
-      glow: 'rgba(94, 234, 212, 0.35)',
-      text: 'text-accent-cool',
-    };
-  }
-  if (score >= 50) {
-    return {
-      stroke: 'var(--accent-warm)',
-      glow: 'rgba(232, 166, 89, 0.35)',
-      text: 'text-accent-warm',
-    };
-  }
-  return {
-    stroke: 'rgba(139, 147, 167, 0.75)',
-    glow: 'rgba(139, 147, 167, 0.2)',
-    text: 'text-fg-muted',
-  };
+/** Top-tier uses brand violet; mid merge-green; low muted. */
+function scoreBandColor(score: number): string {
+  if (score >= 80) return '#B990FF';
+  if (score >= 50) return '#3FB950';
+  return '#7D8590';
 }
 
-/** Radial match score — color-banded; draws in on scroll into view; layoutId for shared morph. */
+/** Radial match score — color-banded; stroke-dash draws in when scrolled into view. */
 export const CompatibilityRing: React.FC<CompatibilityRingProps> = ({
   score,
   size = 48,
@@ -39,14 +24,14 @@ export const CompatibilityRing: React.FC<CompatibilityRingProps> = ({
   className = '',
 }) => {
   const ref = useRef<HTMLDivElement>(null);
-  const inView = useInView(ref, { once: true, margin: '-20px' });
+  const inView = useInView(ref, { once: true, amount: 0.4 });
   const reduced = usePrefersReducedMotion();
-  const [progress, setProgress] = useState(reduced ? score : 0);
+  const clamped = Math.max(0, Math.min(100, score));
+  const [progress, setProgress] = useState(reduced ? clamped : 0);
 
   const radius = (size - 6) / 2;
   const circumference = 2 * Math.PI * radius;
-  const clamped = Math.max(0, Math.min(100, score));
-  const band = scoreBandColor(clamped);
+  const stroke = scoreBandColor(clamped);
 
   useEffect(() => {
     if (!inView) return;
@@ -56,7 +41,7 @@ export const CompatibilityRing: React.FC<CompatibilityRingProps> = ({
     }
     let frame = 0;
     const start = performance.now();
-    const duration = 700;
+    const duration = 750;
     const tick = (now: number) => {
       const t = Math.min(1, (now - start) / duration);
       const eased = 1 - Math.pow(1 - t, 3);
@@ -74,11 +59,7 @@ export const CompatibilityRing: React.FC<CompatibilityRingProps> = ({
       ref={ref}
       layoutId={layoutId}
       className={`relative inline-flex items-center justify-center ${className}`}
-      style={{
-        width: size,
-        height: size,
-        filter: inView && !reduced ? `drop-shadow(0 0 6px ${band.glow})` : undefined,
-      }}
+      style={{ width: size, height: size }}
     >
       <svg width={size} height={size} className="-rotate-90">
         <circle
@@ -94,15 +75,17 @@ export const CompatibilityRing: React.FC<CompatibilityRingProps> = ({
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke={band.stroke}
+          stroke={stroke}
           strokeWidth={3}
           strokeLinecap="round"
           strokeDasharray={circumference}
           strokeDashoffset={offset}
-          style={{ transition: reduced ? 'none' : undefined }}
         />
       </svg>
-      <span className={`absolute text-[10px] font-mono font-medium tabular-nums ${band.text}`}>
+      <span
+        className="absolute text-[10px] font-mono font-medium tabular-nums"
+        style={{ color: stroke }}
+      >
         {Math.round(progress)}
       </span>
     </motion.div>
